@@ -10,10 +10,10 @@ import { getSession, updateSession } from '../db/queries/sessions.js';
 import { recordTokenUsage } from '../db/queries/tokenUsage.js';
 import { recordToolCall } from '../db/queries/toolCalls.js';
 import { getMcpServerByName } from '../db/queries/mcpServers.js';
-import { getSkillByName } from '../db/queries/skills.js';
+import { getSkillByName } from '../skills.js';
+import type { Skill } from '../skills.js';
 import { getProviderByName } from '../db/queries/providers.js';
 import type { McpServer } from '../db/queries/mcpServers.js';
-import type { Skill } from '../db/queries/skills.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -159,10 +159,7 @@ export class Worker {
         if (skill) {
           skills.push({
             name: skill.name,
-            system_prompt: skill.system_prompt,
-            allowed_tools: skill.allowed_tools ?? undefined,
-            model_provider: skill.model_provider ?? undefined,
-            model_id: skill.model_id ?? undefined,
+            system_prompt: skill.systemPrompt,
           });
         } else {
           console.warn(

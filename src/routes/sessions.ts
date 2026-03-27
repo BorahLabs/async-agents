@@ -14,7 +14,7 @@ import {
 } from '../db/queries/messages.js';
 import { getProviderByName } from '../db/queries/providers.js';
 import { getMcpServerByName } from '../db/queries/mcpServers.js';
-import { getSkillByName } from '../db/queries/skills.js';
+import { skillExists } from '../skills.js';
 import { getToolCallsByMessage } from '../db/queries/toolCalls.js';
 import { getTokenUsageByMessage } from '../db/queries/tokenUsage.js';
 import {
@@ -63,8 +63,7 @@ router.post('/', (req: Request, res: Response) => {
         ? skills
         : JSON.parse(skills);
       for (const name of skillNames) {
-        const skill = getSkillByName(name);
-        if (!skill) {
+        if (!skillExists(name)) {
           res.status(400).json({ error: `Skill "${name}" not found` });
           return;
         }

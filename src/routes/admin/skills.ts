@@ -3,11 +3,10 @@ import type { Request, Response } from 'express';
 import {
   listSkills,
   createSkill,
-  getSkill,
-  getSkillByName,
   updateSkill,
   deleteSkill,
-} from '../../db/queries/skills.js';
+  skillExists,
+} from '../../skills.js';
 import { getSetting } from '../../db/queries/settings.js';
 
 const router = Router();
@@ -26,7 +25,7 @@ router.get('/', (_req: Request, res: Response) => {
 // POST / - Create skill
 router.post('/', (req: Request, res: Response) => {
   try {
-    const { name, system_prompt, allowed_tools, model_provider, model_id, description } = req.body;
+    const { name, system_prompt, description } = req.body;
 
     if (!name || !system_prompt) {
       res.status(400).json({ error: 'name and system_prompt are required' });
@@ -35,15 +34,8 @@ router.post('/', (req: Request, res: Response) => {
 
     const skill = createSkill({
       name,
-      system_prompt,
-      allowed_tools: allowed_tools
-        ? typeof allowed_tools === 'string'
-          ? allowed_tools
-          : JSON.stringify(allowed_tools)
-        : null,
-      model_provider: model_provider ?? null,
-      model_id: model_id ?? null,
-      description: description ?? null,
+      description: description ?? name,
+      systemPrompt: system_prompt,
     });
 
     res.status(201).json(skill);
@@ -53,29 +45,15 @@ router.post('/', (req: Request, res: Response) => {
   }
 });
 
-// PUT /:id - Update skill
+// PUT /:id - Update skill (`:id` is the skill name)
 router.put('/:id', (req: Request, res: Response) => {
   try {
-    const id = req.params.id as string;
-    const existing = getSkill(id);
-    if (!existing) {
-      res.status(404).json({ error: 'Skill not found' });
-      return;
-    }
+    const name = req.params.id as string;
+    const { system_prompt, description } = req.body;
 
-    const { name, system_prompt, allowed_tools, model_provider, model_id, description } = req.body;
-
-    const updated = updateSkill(id, {
-      name,
-      system_prompt,
-      allowed_tools: allowed_tools !== undefined
-        ? typeof allowed_tools === 'string'
-          ? allowed_tools
-          : JSON.stringify(allowed_tools)
-        : undefined,
-      model_provider,
-      model_id,
+    const updated = updateSkill(name, {
       description,
+      systemPrompt: system_prompt,
     });
 
     if (!updated) {
@@ -90,17 +68,16 @@ router.put('/:id', (req: Request, res: Response) => {
   }
 });
 
-// DELETE /:id - Delete skill
+// DELETE /:id - Delete skill (`:id` is the skill name)
 router.delete('/:id', (req: Request, res: Response) => {
   try {
-    const id = req.params.id as string;
-    const existing = getSkill(id);
-    if (!existing) {
+    const name = req.params.id as string;
+    const deleted = deleteSkill(name);
+    if (!deleted) {
       res.status(404).json({ error: 'Skill not found' });
       return;
     }
 
-    deleteSkill(id);
     res.status(204).send();
   } catch (error) {
     console.error('[routes/admin/skills] DELETE /:id error:', error);
@@ -167,21 +144,17 @@ router.post('/import', async (req: Request, res: Response) => {
         const skillName = parsed.name || dir.name;
 
         // Check if skill already exists — update if so, create if not
-        const existing = getSkillByName(skillName);
-        if (existing) {
-          updateSkill(existing.id, {
-            system_prompt: parsed.systemPrompt,
+        if (skillExists(skillName)) {
+          updateSkill(skillName, {
+            systemPrompt: parsed.systemPrompt,
             description: parsed.description || undefined,
           });
           imported.push(`${skillName} (updated)`);
         } else {
           createSkill({
             name: skillName,
-            system_prompt: parsed.systemPrompt,
-            allowed_tools: null,
-            model_provider: null,
-            model_id: null,
-            description: parsed.description || null,
+            description: parsed.description || skillName,
+            systemPrompt: parsed.systemPrompt,
           });
           imported.push(skillName);
         }

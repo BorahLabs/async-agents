@@ -96,7 +96,8 @@ function injectProviderEnvVars(): void {
 /**
  * Create a new OpenCode instance for a worker.
  * Each instance starts its own Go server process on a unique port.
- * Injects all configured provider API keys into the environment first.
+ * Injects all configured provider API keys before starting.
+ * Skills are already on disk at ~/.config/opencode/skills/ (managed by src/skills.ts).
  */
 export async function createWorkerInstance(workerId: number): Promise<OpenCodeInstance> {
   injectProviderEnvVars()
@@ -144,9 +145,21 @@ export async function executePrompt(
     },
   }
 
-  // Inject system prompt if provided and non-trivial
+  // Inject session system prompt if provided
   if (params.systemPrompt && params.systemPrompt.trim().length > 0 && params.systemPrompt !== 'string') {
-    promptBody.system = params.systemPrompt
+    promptBody.system = params.systemPrompt.trim()
+  }
+
+  // Skills are loaded by OpenCode from disk via its native skill() tool.
+  // They're synced to ~/.config/opencode/skills/ at worker startup.
+  // If skills are specified, hint the agent to use them in the prompt.
+  if (params.skills && params.skills.length > 0) {
+    const skillNames = params.skills.map(s => s.name).join(', ')
+    const originalText = (parts[0] as { text: string }).text
+    parts[0] = {
+      type: "text",
+      text: `${originalText}\n\n[Use the following skills: ${skillNames}]`,
+    }
   }
 
   // Add structured output schema if provided (skip empty schemas)
