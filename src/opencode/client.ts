@@ -173,27 +173,30 @@ export async function executePrompt(
   })
 
   // The prompt() returns the assistant message in .data with { info, parts }
-  // If .data is empty (e.g. provider not configured), fall back to fetching messages
+  // If .data is empty, the model likely failed silently (bad model ID, missing API key, etc.)
   let responseData = promptResponse.data as Record<string, unknown> | undefined
 
   if (!responseData || !responseData.parts) {
-    console.log(`[opencode] prompt().data has no parts (keys: ${Object.keys(responseData ?? {}).join(',') || 'none'}), falling back to session messages`)
-
     // Fall back: fetch messages from the session and find the last assistant message
     const messagesResponse = await client.session.messages({
       path: { id: opencodeSessionId },
     })
     const messages = (messagesResponse.data ?? []) as Array<Record<string, unknown>>
-    console.log(`[opencode] Session has ${messages.length} messages`)
 
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i]
       const msgInfo = msg.info as Record<string, unknown> | undefined
       if (msgInfo?.role === 'assistant') {
         responseData = msg
-        console.log(`[opencode] Found assistant message with ${((msg.parts as unknown[]) ?? []).length} parts`)
         break
       }
+    }
+
+    // If still no assistant response, throw so the worker marks it as failed
+    if (!responseData || !responseData.parts) {
+      throw new Error(
+        `OpenCode returned an empty response. This usually means the model "${params.model}" is invalid or the provider "${params.provider}" is not configured correctly.`
+      )
     }
   }
 
