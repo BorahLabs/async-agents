@@ -1,172 +1,94 @@
 import express from "express"
-import {
-  createSession,
-  listSessions,
-  getSession,
-  sendPrompt,
-  injectContext,
-  abortSession,
-  listMessages,
-  getMessage,
-  listAgents,
-  mcpStatus,
-  getClient,
-  connectToExisting,
-} from "./opencode.js"
-import type { AgentConfig } from "./opencode.js"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
+import { initDb, closeDb } from "./db/index.js"
+import { authMiddleware } from "./middleware/auth.js"
+import { QueueManager } from "./queue/manager.js"
+import { createHealthRouter } from "./routes/health.js"
+import sessionsRouter from "./routes/sessions.js"
+import filesRouter from "./routes/files.js"
+import gitRouter from "./routes/git.js"
+import providersRouter from "./routes/admin/providers.js"
+import mcpRouter from "./routes/admin/mcp.js"
+import skillsRouter from "./routes/admin/skills.js"
+import settingsRouter from "./routes/admin/settings.js"
+import apiKeysRouter from "./routes/admin/apiKeys.js"
+import { createDashboardRouter } from "./routes/admin/dashboard.js"
+import githubRouter from "./routes/admin/github.js"
+import { countQueuedMessages } from "./db/queries/messages.js"
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url))
 
 const app = express()
-app.use(express.json())
-
 const PORT = parseInt(process.env.PORT ?? "3000", 10)
 
-// Health check
-app.get("/health", (_req, res) => {
-  res.json({ status: "ok" })
-})
+// Initialize database
+initDb()
 
-// Initialize OpenCode -- starts a new server
-app.post("/opencode/init", async (_req, res) => {
-  try {
-    await getClient()
-    res.json({ connected: true })
-  } catch (err) {
-    res.status(500).json({ error: String(err) })
+// Queue manager
+const queueManager = new QueueManager()
+
+function getQueueStats() {
+  return {
+    active: queueManager.activeWorkerCount,
+    max: queueManager.maxWorkers,
+    queueLength: countQueuedMessages(),
   }
+}
+
+// Middleware
+app.use(express.json())
+app.use(authMiddleware)
+
+// Public API routes
+app.use("/api/health", createHealthRouter(getQueueStats))
+app.use("/api/sessions", sessionsRouter)
+app.use("/api/files", filesRouter)
+app.use("/api/git", gitRouter)
+
+// Admin API routes (no auth — handled by middleware skip)
+app.use("/api/admin/providers", providersRouter)
+app.use("/api/admin/mcp-servers", mcpRouter)
+app.use("/api/admin/skills", skillsRouter)
+app.use("/api/admin/settings", settingsRouter)
+app.use("/api/admin/api-keys", apiKeysRouter)
+app.use("/api/admin/dashboard", createDashboardRouter(getQueueStats))
+app.use("/api/admin/github", githubRouter)
+
+// Serve admin panel static files
+const adminPath = path.join(__dirname, "admin")
+app.use(express.static(adminPath))
+app.get(/^\/(?!api\/).*/, (_req, res) => {
+  res.sendFile(path.join(adminPath, "index.html"))
 })
 
-// Connect to an existing OpenCode server
-app.post("/opencode/connect", async (req, res) => {
-  try {
-    const { baseUrl } = req.body
-    if (!baseUrl) {
-      res.status(400).json({ error: "baseUrl is required" })
-      return
-    }
-    await connectToExisting(baseUrl)
-    res.json({ connected: true })
-  } catch (err) {
-    res.status(500).json({ error: String(err) })
-  }
-})
-
-// List sessions
-app.get("/sessions", async (_req, res) => {
-  try {
-    const sessions = await listSessions()
-    res.json(sessions)
-  } catch (err) {
-    res.status(500).json({ error: String(err) })
-  }
-})
-
-// Create session
-app.post("/sessions", async (req, res) => {
-  try {
-    const { title } = req.body ?? {}
-    const session = await createSession(title)
-    res.status(201).json(session)
-  } catch (err) {
-    res.status(500).json({ error: String(err) })
-  }
-})
-
-// Get session
-app.get("/sessions/:id", async (req, res) => {
-  try {
-    const session = await getSession(req.params.id)
-    res.json(session)
-  } catch (err) {
-    res.status(500).json({ error: String(err) })
-  }
-})
-
-// Send prompt to session
-app.post("/sessions/:id/prompt", async (req, res) => {
-  try {
-    const { text, model, agent, system, tools } = req.body
-    if (!text) {
-      res.status(400).json({ error: "text is required" })
-      return
-    }
-    const config: AgentConfig = {}
-    if (model) config.model = model
-    if (agent) config.agent = agent
-    if (system) config.system = system
-    if (tools) config.tools = tools
-
-    const response = await sendPrompt(req.params.id, text, config)
-    res.json(response)
-  } catch (err) {
-    res.status(500).json({ error: String(err) })
-  }
-})
-
-// Inject context without triggering a response
-app.post("/sessions/:id/context", async (req, res) => {
-  try {
-    const { text } = req.body
-    if (!text) {
-      res.status(400).json({ error: "text is required" })
-      return
-    }
-    await injectContext(req.params.id, text)
-    res.status(204).send()
-  } catch (err) {
-    res.status(500).json({ error: String(err) })
-  }
-})
-
-// Abort session
-app.post("/sessions/:id/abort", async (req, res) => {
-  try {
-    await abortSession(req.params.id)
-    res.json({ aborted: true })
-  } catch (err) {
-    res.status(500).json({ error: String(err) })
-  }
-})
-
-// List messages in a session
-app.get("/sessions/:id/messages", async (req, res) => {
-  try {
-    const messages = await listMessages(req.params.id)
-    res.json(messages)
-  } catch (err) {
-    res.status(500).json({ error: String(err) })
-  }
-})
-
-// Get a specific message
-app.get("/sessions/:id/messages/:messageId", async (req, res) => {
-  try {
-    const message = await getMessage(req.params.id, req.params.messageId)
-    res.json(message)
-  } catch (err) {
-    res.status(500).json({ error: String(err) })
-  }
-})
-
-// List available agents
-app.get("/agents", async (_req, res) => {
-  try {
-    const agents = await listAgents()
-    res.json(agents)
-  } catch (err) {
-    res.status(500).json({ error: String(err) })
-  }
-})
-
-// Get MCP server status
-app.get("/mcp/status", async (_req, res) => {
-  try {
-    const status = await mcpStatus()
-    res.json(status)
-  } catch (err) {
-    res.status(500).json({ error: String(err) })
-  }
-})
-
-app.listen(PORT, () => {
+// Start server
+const server = app.listen(PORT, () => {
   console.log(`async-agents API listening on port ${PORT}`)
 })
+
+// Start queue workers
+queueManager.start().catch((err) => {
+  console.error("Failed to start queue manager:", err)
+})
+
+// Graceful shutdown
+function shutdown() {
+  console.log("Shutting down...")
+  queueManager
+    .stop()
+    .then(() => {
+      closeDb()
+      server.close(() => {
+        console.log("Server closed")
+        process.exit(0)
+      })
+    })
+    .catch((err) => {
+      console.error("Error during shutdown:", err)
+      process.exit(1)
+    })
+}
+
+process.on("SIGTERM", shutdown)
+process.on("SIGINT", shutdown)

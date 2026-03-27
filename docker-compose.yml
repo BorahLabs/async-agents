@@ -5,12 +5,14 @@ services:
       - "3000:3000"
     environment:
       - PORT=3000
-      # Pass your LLM provider keys
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - DB_PATH=/app/db/agents.sqlite
+      - DATA_PATH=/app/data
     volumes:
-      # Persist OpenCode data
+      - agents-db:/app/db
+      - agents-data:/app/data
       - opencode-data:/root/.local/share/opencode
 
 volumes:
+  agents-db:
+  agents-data:
   opencode-data:
