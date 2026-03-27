@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
-import { api } from '../api'
+import { adminApi } from '../api'
 
 interface McpServer {
   id: string
@@ -23,7 +23,7 @@ const emptyForm = {
 }
 
 export default function McpServers() {
-  const fetcher = useCallback(() => api<McpServer[]>('/mcp-servers'), [])
+  const fetcher = useCallback(() => adminApi<McpServer[]>('/mcp-servers'), [])
   const { data, error, refresh } = usePolling(fetcher)
   const [editing, setEditing] = useState<string | null>(null)
   const [form, setForm] = useState(emptyForm)
@@ -84,9 +84,9 @@ export default function McpServers() {
         description: form.description || undefined,
       }
       if (editing === 'new') {
-        await api('/mcp-servers', { method: 'POST', body: JSON.stringify(body) })
+        await adminApi('/mcp-servers', { method: 'POST', body: JSON.stringify(body) })
       } else {
-        await api(`/mcp-servers/${editing}`, { method: 'PUT', body: JSON.stringify(body) })
+        await adminApi(`/mcp-servers/${editing}`, { method: 'PUT', body: JSON.stringify(body) })
       }
       setEditing(null)
       refresh()
@@ -100,7 +100,7 @@ export default function McpServers() {
   const remove = async (id: string) => {
     if (!confirm('Delete this MCP server?')) return
     try {
-      await api(`/mcp-servers/${id}`, { method: 'DELETE' })
+      await adminApi(`/mcp-servers/${id}`, { method: 'DELETE' })
       refresh()
     } catch (e) {
       alert(String(e))

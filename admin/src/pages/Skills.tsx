@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
-import { api } from '../api'
+import { adminApi } from '../api'
 
 interface Skill {
   id: string
@@ -23,7 +23,7 @@ const emptyForm = {
 }
 
 export default function Skills() {
-  const fetcher = useCallback(() => api<Skill[]>('/skills'), [])
+  const fetcher = useCallback(() => adminApi<Skill[]>('/skills'), [])
   const { data, error, refresh } = usePolling(fetcher)
   const [editing, setEditing] = useState<string | null>(null)
   const [form, setForm] = useState(emptyForm)
@@ -65,9 +65,9 @@ export default function Skills() {
         modelId: form.modelId || undefined,
       }
       if (editing === 'new') {
-        await api('/skills', { method: 'POST', body: JSON.stringify(body) })
+        await adminApi('/skills', { method: 'POST', body: JSON.stringify(body) })
       } else {
-        await api(`/skills/${editing}`, { method: 'PUT', body: JSON.stringify(body) })
+        await adminApi(`/skills/${editing}`, { method: 'PUT', body: JSON.stringify(body) })
       }
       setEditing(null)
       refresh()
@@ -81,7 +81,7 @@ export default function Skills() {
   const remove = async (id: string) => {
     if (!confirm('Delete this skill?')) return
     try {
-      await api(`/skills/${id}`, { method: 'DELETE' })
+      await adminApi(`/skills/${id}`, { method: 'DELETE' })
       refresh()
     } catch (e) {
       alert(String(e))

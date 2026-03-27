@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
-import { api } from '../api'
+import { adminApi } from '../api'
 
 interface Provider {
   id: string
@@ -14,7 +14,7 @@ interface Provider {
 const emptyForm = { name: '', type: 'openai', baseUrl: '', apiKey: '', models: '' }
 
 export default function Providers() {
-  const fetcher = useCallback(() => api<Provider[]>('/providers'), [])
+  const fetcher = useCallback(() => adminApi<Provider[]>('/providers'), [])
   const { data, error, refresh } = usePolling(fetcher)
   const [editing, setEditing] = useState<string | null>(null)
   const [form, setForm] = useState(emptyForm)
@@ -51,9 +51,9 @@ export default function Providers() {
         models: form.models.split(',').map((m) => m.trim()).filter(Boolean),
       }
       if (editing === 'new') {
-        await api('/providers', { method: 'POST', body: JSON.stringify(body) })
+        await adminApi('/providers', { method: 'POST', body: JSON.stringify(body) })
       } else {
-        await api(`/providers/${editing}`, { method: 'PUT', body: JSON.stringify(body) })
+        await adminApi(`/providers/${editing}`, { method: 'PUT', body: JSON.stringify(body) })
       }
       setEditing(null)
       refresh()
@@ -67,7 +67,7 @@ export default function Providers() {
   const remove = async (id: string) => {
     if (!confirm('Delete this provider?')) return
     try {
-      await api(`/providers/${id}`, { method: 'DELETE' })
+      await adminApi(`/providers/${id}`, { method: 'DELETE' })
       refresh()
     } catch (e) {
       alert(String(e))

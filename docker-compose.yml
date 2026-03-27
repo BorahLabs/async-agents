@@ -2,7 +2,7 @@ services:
   async-agents:
     build: .
     ports:
-      - "3000:3000"
+      - "3001:3000"
     environment:
       - PORT=3000
       - DB_PATH=/app/db/agents.sqlite

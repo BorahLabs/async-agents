@@ -1,10 +1,10 @@
 import { useCallback, useState, useEffect } from 'react'
 import { usePolling } from '../hooks/usePolling'
-import { api } from '../api'
+import { adminApi } from '../api'
 
 interface SettingsData {
-  concurrency: number
-  githubConnected: boolean
+  max_concurrent_workers: string
+  github_token: string
 }
 
 interface ApiKeyRow {
@@ -17,8 +17,8 @@ interface ApiKeyRow {
 }
 
 export default function Settings() {
-  const settingsFetcher = useCallback(() => api<SettingsData>('/settings'), [])
-  const keysFetcher = useCallback(() => api<ApiKeyRow[]>('/api-keys'), [])
+  const settingsFetcher = useCallback(() => adminApi<SettingsData>('/settings'), [])
+  const keysFetcher = useCallback(() => adminApi<ApiKeyRow[]>('/api-keys'), [])
 
   const { data: settings, error: settingsError, refresh: refreshSettings } = usePolling(settingsFetcher)
   const { data: keys, error: keysError, refresh: refreshKeys } = usePolling(keysFetcher)
@@ -36,15 +36,15 @@ export default function Settings() {
   const [creatingKey, setCreatingKey] = useState(false)
 
   useEffect(() => {
-    if (settings) setConcurrency(settings.concurrency)
+    if (settings) setConcurrency(parseInt(settings.max_concurrent_workers) || 2)
   }, [settings])
 
   const saveConcurrency = async () => {
     setSavingConcurrency(true)
     try {
-      await api('/settings', {
+      await adminApi('/settings', {
         method: 'PUT',
-        body: JSON.stringify({ concurrency }),
+        body: JSON.stringify({ max_concurrent_workers: String(concurrency) }),
       })
       refreshSettings()
     } catch (e) {
@@ -58,14 +58,14 @@ export default function Settings() {
     setTestingGithub(true)
     setGithubResult(null)
     try {
-      await api('/settings/github', {
+      await adminApi('/settings', {
         method: 'PUT',
-        body: JSON.stringify({ token: githubToken }),
+        body: JSON.stringify({ github_token: githubToken }),
       })
-      const res = await api<{ connected: boolean; username?: string }>('/settings/github/test')
+      const res = await adminApi<{ success: boolean; message?: string; error?: string }>('/github/test', { method: 'POST' })
       setGithubResult({
-        ok: res.connected,
-        msg: res.connected ? `Connected as ${res.username}` : 'Connection failed',
+        ok: res.success,
+        msg: res.success ? (res.message || 'Connected') : (res.error || 'Connection failed'),
       })
       setGithubToken('')
       refreshSettings()
@@ -79,7 +79,7 @@ export default function Settings() {
   const createKey = async () => {
     setCreatingKey(true)
     try {
-      const res = await api<{ key: string }>('/api-keys', {
+      const res = await adminApi<{ key: string }>('/api-keys', {
         method: 'POST',
         body: JSON.stringify({ label: newKeyLabel }),
       })
@@ -94,7 +94,7 @@ export default function Settings() {
 
   const toggleKey = async (id: string, active: boolean) => {
     try {
-      await api(`/api-keys/${id}`, {
+      await adminApi(`/api-keys/${id}`, {
         method: 'PUT',
         body: JSON.stringify({ active }),
       })
@@ -107,7 +107,7 @@ export default function Settings() {
   const deleteKey = async (id: string) => {
     if (!confirm('Delete this API key?')) return
     try {
-      await api(`/api-keys/${id}`, { method: 'DELETE' })
+      await adminApi(`/api-keys/${id}`, { method: 'DELETE' })
       refreshKeys()
     } catch (e) {
       alert(String(e))
@@ -139,7 +139,7 @@ export default function Settings() {
           <button
             className="btn btn-primary"
             onClick={saveConcurrency}
-            disabled={savingConcurrency || concurrency === settings.concurrency}
+            disabled={savingConcurrency || concurrency === (parseInt(settings.max_concurrent_workers) || 2)}
           >
             {savingConcurrency ? 'Saving...' : 'Save'}
           </button>
@@ -153,7 +153,7 @@ export default function Settings() {
             type="password"
             value={githubToken}
             onChange={(e) => setGithubToken(e.target.value)}
-            placeholder={settings.githubConnected ? '(connected — enter new token to replace)' : 'ghp_...'}
+            placeholder={settings.github_token ? '(configured — enter new token to replace)' : 'ghp_...'}
             className="setting-input"
           />
           <button

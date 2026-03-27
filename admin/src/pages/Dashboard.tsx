@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { usePolling } from '../hooks/usePolling'
-import { api } from '../api'
+import { adminApi } from '../api'
 import StatusBadge from '../components/StatusBadge'
 
 interface DashboardData {
@@ -23,7 +23,7 @@ interface DashboardData {
 }
 
 export default function Dashboard() {
-  const fetcher = useCallback(() => api<DashboardData>('/dashboard'), [])
+  const fetcher = useCallback(() => adminApi<DashboardData>('/dashboard'), [])
   const { data, error } = usePolling(fetcher)
 
   if (error) return <div className="error-banner">{error}</div>
