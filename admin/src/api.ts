@@ -4,7 +4,9 @@ export async function api<T>(path: string, options?: RequestInit): Promise<T> {
     ...options,
   })
   if (!res.ok) throw new Error(await res.text())
-  return res.json()
+  if (res.status === 204) return undefined as T
+  const text = await res.text()
+  return text ? JSON.parse(text) : (undefined as T)
 }
 
 export async function adminApi<T>(path: string, options?: RequestInit): Promise<T> {
