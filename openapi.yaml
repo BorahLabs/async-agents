@@ -1,0 +1,2023 @@
+openapi: 3.0.3
+info:
+  title: Async Agents API
+  version: "0.2.0"
+  description: API for managing OpenCode AI agents remotely
+
+servers:
+  - url: http://localhost:3000
+    description: Docker internal
+  - url: http://localhost:3001
+    description: Docker mapped
+
+tags:
+  - name: Health
+    description: Server health and queue status
+  - name: Sessions
+    description: Create and manage agent sessions
+  - name: Messages
+    description: Send messages and retrieve responses
+  - name: Files
+    description: Upload, list, and download files
+  - name: Git
+    description: Clone repositories via GitHub CLI
+  - name: "Admin - Providers"
+    description: Manage LLM provider configurations
+  - name: "Admin - MCP Servers"
+    description: Manage Model Context Protocol servers
+  - name: "Admin - Skills"
+    description: Manage reusable agent skills
+  - name: "Admin - Settings"
+    description: Manage global settings (e.g. GitHub token)
+  - name: "Admin - API Keys"
+    description: Manage API keys for public endpoint authentication
+  - name: "Admin - Dashboard"
+    description: Aggregated stats for the admin panel
+  - name: "Admin - GitHub"
+    description: GitHub integration helpers
+  - name: "Admin - Sessions"
+    description: Read-only session browsing for the admin panel
+
+security:
+  - BearerAuth: []
+
+paths:
+  # ───────────────────────── Health ─────────────────────────
+  /api/health:
+    get:
+      operationId: getHealth
+      summary: Get server health and queue stats
+      tags: [Health]
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Health status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ok
+                  workers:
+                    $ref: "#/components/schemas/QueueStats"
+                  uptime:
+                    type: number
+                    description: Server uptime in seconds
+                    example: 3600.42
+                required: [status, workers, uptime]
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ───────────────────────── Sessions ─────────────────────────
+  /api/sessions:
+    post:
+      operationId: createSession
+      summary: Create a new agent session
+      tags: [Sessions]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                provider:
+                  type: string
+                  description: Name of a configured provider
+                  example: anthropic
+                model:
+                  type: string
+                  example: claude-sonnet-4-20250514
+                title:
+                  type: string
+                  nullable: true
+                  example: Code review session
+                system_prompt:
+                  type: string
+                  nullable: true
+                working_directory:
+                  type: string
+                  nullable: true
+                  description: Folder name to use as working directory (will be created under /data)
+                  example: my-project
+                mcp_servers:
+                  oneOf:
+                    - type: array
+                      items:
+                        type: string
+                    - type: string
+                  nullable: true
+                  description: MCP server names (array or JSON string)
+                skills:
+                  oneOf:
+                    - type: array
+                      items:
+                        type: string
+                    - type: string
+                  nullable: true
+                  description: Skill names (array or JSON string)
+              required: [provider, model]
+      responses:
+        "201":
+          description: Session created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    example: sess_d290f1ee-6c54-4b01-90e6-d701748f0851
+                  status:
+                    type: string
+                    example: active
+                  createdAt:
+                    type: string
+                    format: date-time
+                required: [id, status, createdAt]
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    get:
+      operationId: listSessions
+      summary: List sessions with pagination
+      tags: [Sessions]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 100
+        - name: status
+          in: query
+          schema:
+            type: string
+          description: Filter by session status
+      responses:
+        "200":
+          description: Paginated session list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SessionWithMessageCount"
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
+                required: [data, pagination]
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/sessions/{id}:
+    get:
+      operationId: getSession
+      summary: Get session details
+      tags: [Sessions]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Session details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/sessions/{id}/messages:
+    get:
+      operationId: listSessionMessages
+      summary: Get all messages for a session with tool calls and token usage
+      tags: [Messages]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Array of enriched messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/EnrichedMessage"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    post:
+      operationId: sendMessage
+      summary: Send a message to a session (queued for processing)
+      tags: [Messages]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                text:
+                  type: string
+                  description: The user message text
+                  example: Refactor the auth module
+                structuredOutput:
+                  description: JSON Schema for structured output (object or JSON string)
+                  oneOf:
+                    - type: object
+                    - type: string
+                  nullable: true
+              required: [text]
+      responses:
+        "201":
+          description: Message queued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                    example: msg_a1b2c3d4-e5f6-7890-abcd-ef1234567890
+                  status:
+                    type: string
+                    example: queued
+                  position:
+                    type: integer
+                    example: 1
+                  queuedAt:
+                    type: string
+                    format: date-time
+                required: [id, status, position, queuedAt]
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/sessions/{id}/messages/{msgId}:
+    get:
+      operationId: getMessage
+      summary: Get a specific message with tool calls and token usage
+      tags: [Messages]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+        - name: msgId
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Message ID
+      responses:
+        "200":
+          description: Enriched message
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EnrichedMessage"
+        "404":
+          description: Session or message not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ───────────────────────── Files ─────────────────────────
+  /api/files/{folder}:
+    post:
+      operationId: uploadFiles
+      summary: Upload files to a folder (multipart/form-data)
+      tags: [Files]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Folder"
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              properties:
+                files:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+              required: [files]
+      responses:
+        "201":
+          description: Files uploaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  uploaded:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        name:
+                          type: string
+                          example: main.ts
+                        size:
+                          type: integer
+                          example: 1024
+                        path:
+                          type: string
+                          example: my-project/main.ts
+                      required: [name, size, path]
+                required: [uploaded]
+        "400":
+          description: Validation error or no files uploaded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    get:
+      operationId: listFiles
+      summary: List all files in a folder (recursive)
+      tags: [Files]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Folder"
+      responses:
+        "200":
+          description: File listing
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  files:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        path:
+                          type: string
+                          example: src/index.ts
+                        size:
+                          type: integer
+                          example: 2048
+                        modified:
+                          type: string
+                          format: date-time
+                      required: [path, size, modified]
+                required: [files]
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/files/{folder}/{filepath}:
+    get:
+      operationId: downloadFile
+      summary: Download a single file from a folder
+      tags: [Files]
+      security:
+        - BearerAuth: []
+      parameters:
+        - $ref: "#/components/parameters/Folder"
+        - name: filepath
+          in: path
+          required: true
+          schema:
+            type: string
+          description: Relative file path within the folder (may include slashes)
+          example: src/index.ts
+      responses:
+        "200":
+          description: File contents
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: File not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ───────────────────────── Git ─────────────────────────
+  /api/git/clone:
+    post:
+      operationId: cloneRepo
+      summary: Clone a GitHub repository via gh CLI
+      tags: [Git]
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                repo:
+                  type: string
+                  description: GitHub repo in owner/repo format
+                  example: opencode-ai/opencode
+                branch:
+                  type: string
+                  nullable: true
+                  description: Branch to clone (optional, defaults to default branch)
+                  example: main
+                folder:
+                  type: string
+                  description: Folder name under /data to clone into
+                  example: opencode-repo
+              required: [repo, folder]
+      responses:
+        "201":
+          description: Repository cloned
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  folder:
+                    type: string
+                    example: opencode-repo
+                  repo:
+                    type: string
+                    example: opencode-ai/opencode
+                  branch:
+                    type: string
+                    nullable: true
+                    example: main
+                  commitSha:
+                    type: string
+                    example: a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4e5f6a1b2
+                required: [folder, repo, branch, commitSha]
+        "400":
+          description: Validation error or missing GitHub token
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Clone failed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ───────────────────── Admin - Providers ──────────────────────
+  /api/admin/providers:
+    get:
+      operationId: listProviders
+      summary: List all providers (API keys masked)
+      tags: ["Admin - Providers"]
+      security: []
+      responses:
+        "200":
+          description: Array of providers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Provider"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    post:
+      operationId: createProvider
+      summary: Create a new provider
+      tags: ["Admin - Providers"]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: my-anthropic
+                type:
+                  type: string
+                  example: anthropic
+                base_url:
+                  type: string
+                  nullable: true
+                  example: https://api.anthropic.com/v1
+                api_key:
+                  type: string
+                  example: sk-ant-...
+                models:
+                  oneOf:
+                    - type: array
+                      items:
+                        type: string
+                    - type: string
+                  nullable: true
+                  description: Allowed model IDs (array or JSON string)
+                env_vars:
+                  oneOf:
+                    - type: object
+                      additionalProperties:
+                        type: string
+                    - type: string
+                  nullable: true
+                  description: Additional environment variables (object or JSON string)
+              required: [name, type, api_key]
+      responses:
+        "201":
+          description: Provider created (API key masked)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Provider"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/admin/providers/registry:
+    get:
+      operationId: getProviderRegistry
+      summary: Get the provider registry (available provider types)
+      tags: ["Admin - Providers"]
+      security: []
+      responses:
+        "200":
+          description: Array of provider info entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProviderInfo"
+
+  /api/admin/providers/{id}:
+    put:
+      operationId: updateProvider
+      summary: Update an existing provider
+      tags: ["Admin - Providers"]
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                type:
+                  type: string
+                base_url:
+                  type: string
+                  nullable: true
+                api_key:
+                  type: string
+                models:
+                  oneOf:
+                    - type: array
+                      items:
+                        type: string
+                    - type: string
+                  nullable: true
+                env_vars:
+                  oneOf:
+                    - type: object
+                      additionalProperties:
+                        type: string
+                    - type: string
+                  nullable: true
+      responses:
+        "200":
+          description: Provider updated (API key masked)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Provider"
+        "404":
+          description: Provider not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    delete:
+      operationId: deleteProvider
+      summary: Delete a provider
+      tags: ["Admin - Providers"]
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceId"
+      responses:
+        "204":
+          description: Provider deleted
+        "404":
+          description: Provider not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ───────────────────── Admin - MCP Servers ──────────────────────
+  /api/admin/mcp-servers:
+    get:
+      operationId: listMcpServers
+      summary: List all MCP servers (env vars masked)
+      tags: ["Admin - MCP Servers"]
+      security: []
+      responses:
+        "200":
+          description: Array of MCP servers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/McpServer"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    post:
+      operationId: createMcpServer
+      summary: Create a new MCP server
+      tags: ["Admin - MCP Servers"]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: filesystem
+                type:
+                  type: string
+                  enum: [stdio, sse]
+                command:
+                  type: string
+                  nullable: true
+                  description: Command to start the server (for stdio type)
+                  example: npx -y @modelcontextprotocol/server-filesystem /data
+                url:
+                  type: string
+                  nullable: true
+                  description: URL for the server (for sse type)
+                env_vars:
+                  oneOf:
+                    - type: object
+                      additionalProperties:
+                        type: string
+                    - type: string
+                  nullable: true
+                description:
+                  type: string
+                  nullable: true
+              required: [name, type]
+      responses:
+        "201":
+          description: MCP server created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpServer"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/admin/mcp-servers/{id}:
+    put:
+      operationId: updateMcpServer
+      summary: Update an existing MCP server
+      tags: ["Admin - MCP Servers"]
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                type:
+                  type: string
+                  enum: [stdio, sse]
+                command:
+                  type: string
+                  nullable: true
+                url:
+                  type: string
+                  nullable: true
+                env_vars:
+                  oneOf:
+                    - type: object
+                      additionalProperties:
+                        type: string
+                    - type: string
+                  nullable: true
+                description:
+                  type: string
+                  nullable: true
+      responses:
+        "200":
+          description: MCP server updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/McpServer"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: MCP server not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    delete:
+      operationId: deleteMcpServer
+      summary: Delete an MCP server
+      tags: ["Admin - MCP Servers"]
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceId"
+      responses:
+        "204":
+          description: MCP server deleted
+        "404":
+          description: MCP server not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ───────────────────── Admin - Skills ──────────────────────
+  /api/admin/skills:
+    get:
+      operationId: listSkills
+      summary: List all skills
+      tags: ["Admin - Skills"]
+      security: []
+      responses:
+        "200":
+          description: Array of skills
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Skill"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    post:
+      operationId: createSkill
+      summary: Create a new skill
+      tags: ["Admin - Skills"]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                  example: code-reviewer
+                system_prompt:
+                  type: string
+                  example: You are a meticulous code reviewer...
+                allowed_tools:
+                  oneOf:
+                    - type: array
+                      items:
+                        type: string
+                    - type: string
+                  nullable: true
+                  description: Tool names this skill may use (array or JSON string)
+                model_provider:
+                  type: string
+                  nullable: true
+                model_id:
+                  type: string
+                  nullable: true
+                description:
+                  type: string
+                  nullable: true
+              required: [name, system_prompt]
+      responses:
+        "201":
+          description: Skill created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Skill"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/admin/skills/{id}:
+    put:
+      operationId: updateSkill
+      summary: Update an existing skill
+      tags: ["Admin - Skills"]
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name:
+                  type: string
+                system_prompt:
+                  type: string
+                allowed_tools:
+                  oneOf:
+                    - type: array
+                      items:
+                        type: string
+                    - type: string
+                  nullable: true
+                model_provider:
+                  type: string
+                  nullable: true
+                model_id:
+                  type: string
+                  nullable: true
+                description:
+                  type: string
+                  nullable: true
+      responses:
+        "200":
+          description: Skill updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Skill"
+        "404":
+          description: Skill not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    delete:
+      operationId: deleteSkill
+      summary: Delete a skill
+      tags: ["Admin - Skills"]
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceId"
+      responses:
+        "204":
+          description: Skill deleted
+        "404":
+          description: Skill not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/admin/skills/import:
+    post:
+      operationId: importSkills
+      summary: Import skills from a GitHub repository URL
+      tags: ["Admin - Skills"]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                url:
+                  type: string
+                  description: "GitHub URL (e.g. https://github.com/owner/repo or https://github.com/owner/repo/tree/branch/path)"
+                  example: https://github.com/opencode-ai/skills
+              required: [url]
+      responses:
+        "200":
+          description: Import results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  imported:
+                    type: array
+                    items:
+                      type: string
+                    description: Names of successfully imported skills
+                  skipped:
+                    type: array
+                    items:
+                      type: string
+                    description: Skills that were skipped with reasons
+                  errors:
+                    type: array
+                    items:
+                      type: string
+                    description: Skills that failed with error messages
+                  total:
+                    type: integer
+                    description: Total number of skill directories found
+                required: [imported, skipped, errors, total]
+        "400":
+          description: Invalid URL or no skills found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ───────────────────── Admin - Settings ──────────────────────
+  /api/admin/settings:
+    get:
+      operationId: getSettings
+      summary: Get all settings as key-value pairs
+      tags: ["Admin - Settings"]
+      security: []
+      responses:
+        "200":
+          description: Settings object
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+                  nullable: true
+                example:
+                  github_token: ghp_abc123...
+                  max_retries: "3"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    put:
+      operationId: updateSettings
+      summary: Update settings (body is key-value pairs)
+      tags: ["Admin - Settings"]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties:
+                type: string
+              example:
+                github_token: ghp_new_token_here
+                max_retries: "5"
+      responses:
+        "200":
+          description: Updated settings
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: string
+                  nullable: true
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ───────────────────── Admin - API Keys ──────────────────────
+  /api/admin/api-keys:
+    get:
+      operationId: listApiKeys
+      summary: List all API keys (full key never shown)
+      tags: ["Admin - API Keys"]
+      security: []
+      responses:
+        "200":
+          description: Array of API key summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApiKeySummary"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    post:
+      operationId: createApiKey
+      summary: Create a new API key (full key returned ONCE)
+      tags: ["Admin - API Keys"]
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                label:
+                  type: string
+                  example: CI/CD pipeline
+              required: [label]
+      responses:
+        "201":
+          description: API key created (full key shown only in this response)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiKeyCreated"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/admin/api-keys/{id}:
+    put:
+      operationId: toggleApiKey
+      summary: Toggle API key active status
+      tags: ["Admin - API Keys"]
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                active:
+                  type: boolean
+              required: [active]
+      responses:
+        "200":
+          description: API key status updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  active:
+                    type: boolean
+                required: [id, active]
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+    delete:
+      operationId: deleteApiKey
+      summary: Delete an API key
+      tags: ["Admin - API Keys"]
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/ResourceId"
+      responses:
+        "204":
+          description: API key deleted
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ───────────────────── Admin - Dashboard ──────────────────────
+  /api/admin/dashboard:
+    get:
+      operationId: getDashboard
+      summary: Get aggregated dashboard stats
+      tags: ["Admin - Dashboard"]
+      security: []
+      responses:
+        "200":
+          description: Dashboard statistics
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  workers:
+                    $ref: "#/components/schemas/QueueStats"
+                  sessions:
+                    type: object
+                    properties:
+                      total:
+                        type: integer
+                      active:
+                        type: integer
+                      todayCount:
+                        type: integer
+                    required: [total, active, todayCount]
+                  recentMessages:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/Message"
+                    description: Last 10 completed or failed messages
+                  tokenUsage:
+                    type: object
+                    properties:
+                      day:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/TokenUsageStat"
+                      week:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/TokenUsageStat"
+                      month:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/TokenUsageStat"
+                    required: [day, week, month]
+                required: [workers, sessions, recentMessages, tokenUsage]
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  # ───────────────────── Admin - GitHub ──────────────────────
+  /api/admin/github/test:
+    post:
+      operationId: testGithubToken
+      summary: Test the configured GitHub token
+      tags: ["Admin - GitHub"]
+      security: []
+      responses:
+        "200":
+          description: GitHub token is valid
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+                  message:
+                    type: string
+                required: [success, message]
+        "400":
+          description: Token missing or invalid
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                    example: false
+                  error:
+                    type: string
+                required: [success, error]
+
+  # ───────────────────── Admin - Sessions ──────────────────────
+  /api/admin/sessions:
+    get:
+      operationId: adminListSessions
+      summary: List sessions (admin, read-only, no auth)
+      tags: ["Admin - Sessions"]
+      security: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: Paginated session list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/SessionWithMessageCount"
+                  pagination:
+                    $ref: "#/components/schemas/Pagination"
+                required: [data, pagination]
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/admin/sessions/{id}:
+    get:
+      operationId: adminGetSession
+      summary: Get session details (admin, read-only)
+      tags: ["Admin - Sessions"]
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Session details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Session"
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /api/admin/sessions/{id}/messages:
+    get:
+      operationId: adminListSessionMessages
+      summary: Get all messages for a session (admin, read-only)
+      tags: ["Admin - Sessions"]
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/SessionId"
+      responses:
+        "200":
+          description: Messages with tool calls and token usage
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  messages:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/EnrichedMessage"
+                required: [messages]
+        "404":
+          description: Session not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: Server error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: >
+        API key authentication for public endpoints (/api/* except /api/admin/*).
+        Pass the key as `Authorization: Bearer sk_...`.
+        If no API keys have been created yet the server runs in bootstrapping
+        mode and accepts all requests without authentication.
+
+  parameters:
+    SessionId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Session ID
+      example: sess_d290f1ee-6c54-4b01-90e6-d701748f0851
+
+    ResourceId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Resource UUID
+      example: d290f1ee-6c54-4b01-90e6-d701748f0851
+
+    Folder:
+      name: folder
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Folder name (alphanumeric, hyphens, underscores only)
+      example: my-project
+
+  schemas:
+    # ─── Core domain objects ───
+
+    Session:
+      type: object
+      properties:
+        id:
+          type: string
+          example: sess_d290f1ee-6c54-4b01-90e6-d701748f0851
+        title:
+          type: string
+          nullable: true
+        status:
+          type: string
+          example: active
+        provider:
+          type: string
+          example: anthropic
+        model:
+          type: string
+          example: claude-sonnet-4-20250514
+        system_prompt:
+          type: string
+          nullable: true
+        working_directory:
+          type: string
+          nullable: true
+        mcp_servers:
+          type: string
+          nullable: true
+          description: JSON-encoded array of MCP server names
+        skills:
+          type: string
+          nullable: true
+          description: JSON-encoded array of skill names
+        opencode_session_id:
+          type: string
+          nullable: true
+          description: OpenCode SDK session ID (set once processing starts)
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - status
+        - provider
+        - model
+        - created_at
+        - updated_at
+
+    SessionWithMessageCount:
+      allOf:
+        - $ref: "#/components/schemas/Session"
+        - type: object
+          properties:
+            message_count:
+              type: integer
+          required: [message_count]
+
+    Message:
+      type: object
+      properties:
+        id:
+          type: string
+          example: msg_a1b2c3d4-e5f6-7890-abcd-ef1234567890
+        session_id:
+          type: string
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [queued, processing, completed, failed]
+        structured_output_schema:
+          type: string
+          nullable: true
+          description: JSON Schema for structured output (JSON string)
+        structured_output_result:
+          type: string
+          nullable: true
+          description: Structured output result (JSON string)
+        error:
+          type: string
+          nullable: true
+        retry_count:
+          type: integer
+        next_retry_at:
+          type: string
+          format: date-time
+          nullable: true
+        position:
+          type: integer
+        queued_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+          nullable: true
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+        failed_at:
+          type: string
+          format: date-time
+          nullable: true
+      required:
+        - id
+        - session_id
+        - role
+        - status
+        - retry_count
+        - position
+        - queued_at
+
+    EnrichedMessage:
+      allOf:
+        - $ref: "#/components/schemas/Message"
+        - type: object
+          properties:
+            tool_calls:
+              type: array
+              items:
+                $ref: "#/components/schemas/ToolCall"
+            token_usage:
+              type: array
+              items:
+                $ref: "#/components/schemas/TokenUsage"
+          required: [tool_calls, token_usage]
+
+    ToolCall:
+      type: object
+      properties:
+        id:
+          type: string
+        message_id:
+          type: string
+        tool_name:
+          type: string
+        input:
+          type: string
+          nullable: true
+          description: JSON-encoded tool input
+        output:
+          type: string
+          nullable: true
+          description: JSON-encoded tool output
+        duration_ms:
+          type: integer
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - message_id
+        - tool_name
+        - created_at
+
+    TokenUsage:
+      type: object
+      properties:
+        id:
+          type: string
+        message_id:
+          type: string
+        session_id:
+          type: string
+        provider:
+          type: string
+        model:
+          type: string
+        raw_usage:
+          type: string
+          description: JSON-encoded raw usage object from the provider
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - message_id
+        - session_id
+        - provider
+        - model
+        - raw_usage
+        - created_at
+
+    TokenUsageStat:
+      type: object
+      properties:
+        provider:
+          type: string
+        date:
+          type: string
+        total_input_tokens:
+          type: integer
+        total_output_tokens:
+          type: integer
+        request_count:
+          type: integer
+      required:
+        - provider
+        - date
+        - total_input_tokens
+        - total_output_tokens
+        - request_count
+
+    Provider:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+        base_url:
+          type: string
+          nullable: true
+        api_key:
+          type: string
+          description: Masked API key (first 8 chars + "...")
+        models:
+          type: string
+          nullable: true
+          description: JSON-encoded array of model IDs
+        env_vars:
+          type: string
+          nullable: true
+          description: JSON-encoded object of environment variables (values masked)
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - type
+        - api_key
+        - created_at
+        - updated_at
+
+    ProviderInfo:
+      type: object
+      properties:
+        id:
+          type: string
+          example: anthropic
+        name:
+          type: string
+          example: Anthropic
+        authType:
+          type: string
+          enum: [api_key, oauth, env_vars, custom]
+        envVars:
+          type: array
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+              label:
+                type: string
+              required:
+                type: boolean
+              placeholder:
+                type: string
+            required: [key, label, required]
+        baseUrl:
+          type: string
+        description:
+          type: string
+      required:
+        - id
+        - name
+        - authType
+
+    McpServer:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [stdio, sse]
+        command:
+          type: string
+          nullable: true
+        url:
+          type: string
+          nullable: true
+        env_vars:
+          type: string
+          nullable: true
+          description: JSON-encoded object of environment variables (values masked in responses)
+        description:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - type
+        - created_at
+        - updated_at
+
+    Skill:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        system_prompt:
+          type: string
+        allowed_tools:
+          type: string
+          nullable: true
+          description: JSON-encoded array of allowed tool names
+        model_provider:
+          type: string
+          nullable: true
+        model_id:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - system_prompt
+        - created_at
+        - updated_at
+
+    ApiKeySummary:
+      type: object
+      description: API key listing (full key is never returned)
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        prefix:
+          type: string
+          description: First 8 characters of the key
+          example: sk_a1b2c3
+        active:
+          type: boolean
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - label
+        - prefix
+        - active
+        - createdAt
+
+    ApiKeyCreated:
+      type: object
+      description: Returned only once when a key is created
+      properties:
+        id:
+          type: string
+        key:
+          type: string
+          description: The full API key (shown only in this response)
+          example: sk_a1b2c3d4e5f6...
+        prefix:
+          type: string
+          example: sk_a1b2c3
+        label:
+          type: string
+      required:
+        - id
+        - key
+        - prefix
+        - label
+
+    Setting:
+      type: object
+      properties:
+        key:
+          type: string
+        value:
+          type: string
+          nullable: true
+        updated_at:
+          type: string
+          format: date-time
+      required:
+        - key
+        - updated_at
+
+    QueueStats:
+      type: object
+      properties:
+        active:
+          type: integer
+          description: Number of currently active workers
+        max:
+          type: integer
+          description: Maximum number of workers
+        queueLength:
+          type: integer
+          description: Number of messages waiting in the queue
+      required:
+        - active
+        - max
+        - queueLength
+
+    Pagination:
+      type: object
+      properties:
+        page:
+          type: integer
+        limit:
+          type: integer
+        total:
+          type: integer
+        totalPages:
+          type: integer
+      required:
+        - page
+        - limit
+        - total
+        - totalPages
+
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+          description: Human-readable error message
+      required:
+        - error
