@@ -5,10 +5,8 @@ info:
   description: API for managing OpenCode AI agents remotely
 
 servers:
-  - url: http://localhost:3000
-    description: Docker internal
   - url: http://localhost:3001
-    description: Docker mapped
+    description: Default (docker-compose mapped port)
 
 tags:
   - name: Health
