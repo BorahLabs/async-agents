@@ -179,11 +179,16 @@ export async function executePrompt(
     }
   }
 
-  // Send the prompt — response contains the assistant message directly
-  const promptResponse = await client.session.prompt({
+  // Send the prompt with a 5-minute timeout to prevent hanging forever
+  const PROMPT_TIMEOUT_MS = 5 * 60 * 1000
+  const promptPromise = client.session.prompt({
     path: { id: opencodeSessionId },
     body: promptBody as Parameters<typeof client.session.prompt>[0]["body"],
   })
+  const timeoutPromise = new Promise<never>((_, reject) =>
+    setTimeout(() => reject(new Error(`Prompt timed out after ${PROMPT_TIMEOUT_MS / 1000}s`)), PROMPT_TIMEOUT_MS)
+  )
+  const promptResponse = await Promise.race([promptPromise, timeoutPromise])
 
   // The prompt() returns the assistant message in .data with { info, parts }
   // If .data is empty, the model likely failed silently (bad model ID, missing API key, etc.)
