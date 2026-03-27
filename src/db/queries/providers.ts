@@ -8,6 +8,7 @@ export interface Provider {
   base_url: string | null;
   api_key: string;
   models: string | null;
+  env_vars: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -18,6 +19,7 @@ export interface CreateProviderData {
   base_url?: string | null;
   api_key: string;
   models?: string | null;
+  env_vars?: string | null;
 }
 
 export interface UpdateProviderData {
@@ -26,15 +28,16 @@ export interface UpdateProviderData {
   base_url?: string | null;
   api_key?: string;
   models?: string | null;
+  env_vars?: string | null;
 }
 
 export function createProvider(data: CreateProviderData): Provider {
   const db = getDb();
   const id = uuidv4();
   db.prepare(
-    `INSERT INTO providers (id, name, type, base_url, api_key, models)
-     VALUES (?, ?, ?, ?, ?, ?)`
-  ).run(id, data.name, data.type, data.base_url ?? null, data.api_key, data.models ?? null);
+    `INSERT INTO providers (id, name, type, base_url, api_key, models, env_vars)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, data.name, data.type, data.base_url ?? null, data.api_key, data.models ?? null, data.env_vars ?? null);
 
   return getProvider(id)!;
 }
@@ -78,6 +81,10 @@ export function updateProvider(id: string, data: UpdateProviderData): Provider |
   if (data.models !== undefined) {
     fields.push('models = ?');
     values.push(data.models);
+  }
+  if (data.env_vars !== undefined) {
+    fields.push('env_vars = ?');
+    values.push(data.env_vars);
   }
 
   if (fields.length === 0) return getProvider(id);
