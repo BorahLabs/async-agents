@@ -2,15 +2,43 @@ import { useCallback, useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { adminApi } from '../api'
 
+interface SkillRaw {
+  id: string
+  name: string
+  description: string | null
+  system_prompt: string
+  allowed_tools: string | null
+  model_provider: string | null
+  model_id: string | null
+  created_at: string
+}
+
 interface Skill {
   id: string
   name: string
-  description?: string
+  description: string
   systemPrompt: string
   allowedTools: string[]
-  modelProvider?: string
-  modelId?: string
+  modelProvider: string
+  modelId: string
   createdAt: string
+}
+
+function parseSkill(s: SkillRaw): Skill {
+  let allowedTools: string[] = []
+  if (s.allowed_tools) {
+    try { allowedTools = JSON.parse(s.allowed_tools) } catch { allowedTools = [] }
+  }
+  return {
+    id: s.id,
+    name: s.name,
+    description: s.description || '',
+    systemPrompt: s.system_prompt,
+    allowedTools,
+    modelProvider: s.model_provider || '',
+    modelId: s.model_id || '',
+    createdAt: s.created_at,
+  }
 }
 
 interface ImportResult {
@@ -30,7 +58,10 @@ const emptyForm = {
 }
 
 export default function Skills() {
-  const fetcher = useCallback(() => adminApi<Skill[]>('/skills'), [])
+  const fetcher = useCallback(async () => {
+    const raw = await adminApi<SkillRaw[]>('/skills')
+    return raw.map(parseSkill)
+  }, [])
   const { data, error, refresh } = usePolling(fetcher)
   const [editing, setEditing] = useState<string | null>(null)
   const [form, setForm] = useState(emptyForm)

@@ -2,6 +2,17 @@ import { useCallback, useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { adminApi } from '../api'
 
+interface ProviderRaw {
+  id: string
+  name: string
+  type: string
+  base_url: string | null
+  api_key: string
+  models: string | null
+  created_at: string
+  updated_at: string
+}
+
 interface Provider {
   id: string
   name: string
@@ -11,10 +22,28 @@ interface Provider {
   createdAt: string
 }
 
+function parseProvider(p: ProviderRaw): Provider {
+  let models: string[] = []
+  if (p.models) {
+    try { models = JSON.parse(p.models) } catch { models = [] }
+  }
+  return {
+    id: p.id,
+    name: p.name,
+    type: p.type,
+    baseUrl: p.base_url || '',
+    models,
+    createdAt: p.created_at,
+  }
+}
+
 const emptyForm = { name: '', type: 'openai', baseUrl: '', apiKey: '', models: '' }
 
 export default function Providers() {
-  const fetcher = useCallback(() => adminApi<Provider[]>('/providers'), [])
+  const fetcher = useCallback(async () => {
+    const raw = await adminApi<ProviderRaw[]>('/providers')
+    return raw.map(parseProvider)
+  }, [])
   const { data, error, refresh } = usePolling(fetcher)
   const [editing, setEditing] = useState<string | null>(null)
   const [form, setForm] = useState(emptyForm)

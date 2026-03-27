@@ -15,6 +15,7 @@ import settingsRouter from "./routes/admin/settings.js"
 import apiKeysRouter from "./routes/admin/apiKeys.js"
 import { createDashboardRouter } from "./routes/admin/dashboard.js"
 import githubRouter from "./routes/admin/github.js"
+import adminSessionsRouter from "./routes/admin/sessions.js"
 import { countQueuedMessages } from "./db/queries/messages.js"
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -54,6 +55,7 @@ app.use("/api/admin/settings", settingsRouter)
 app.use("/api/admin/api-keys", apiKeysRouter)
 app.use("/api/admin/dashboard", createDashboardRouter(getQueueStats))
 app.use("/api/admin/github", githubRouter)
+app.use("/api/admin/sessions", adminSessionsRouter)
 
 // Serve admin panel static files
 const adminPath = path.join(__dirname, "admin")

@@ -1,34 +1,36 @@
 import { useCallback, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { usePolling } from '../hooks/usePolling'
-import { api } from '../api'
+import { adminApi } from '../api'
 import StatusBadge from '../components/StatusBadge'
 
-interface Session {
+interface SessionRow {
   id: string
-  title: string
+  title: string | null
   status: string
   provider: string
   model: string
-  messageCount: number
-  createdAt: string
-  lastActiveAt: string
+  created_at: string
+  updated_at: string
 }
 
 interface SessionsResponse {
-  sessions: Session[]
-  total: number
-  page: number
-  pageSize: number
+  data: SessionRow[]
+  pagination: {
+    page: number
+    limit: number
+    total: number
+    totalPages: number
+  }
 }
 
 export default function Sessions() {
   const navigate = useNavigate()
   const [page, setPage] = useState(1)
-  const pageSize = 20
+  const limit = 20
 
   const fetcher = useCallback(
-    () => api<SessionsResponse>(`/sessions?page=${page}&pageSize=${pageSize}`),
+    () => adminApi<SessionsResponse>(`/sessions?page=${page}&limit=${limit}`),
     [page]
   )
   const { data, error } = usePolling(fetcher)
@@ -36,7 +38,7 @@ export default function Sessions() {
   if (error) return <div className="error-banner">{error}</div>
   if (!data) return <div className="loading">Loading...</div>
 
-  const totalPages = Math.ceil(data.total / pageSize)
+  const totalPages = data.pagination.totalPages
 
   return (
     <div className="page">
@@ -50,32 +52,30 @@ export default function Sessions() {
                 <th>Title</th>
                 <th>Status</th>
                 <th>Provider / Model</th>
-                <th>Messages</th>
                 <th>Created</th>
-                <th>Last Active</th>
+                <th>Last Updated</th>
               </tr>
             </thead>
             <tbody>
-              {data.sessions.map((s) => (
+              {data.data.map((s) => (
                 <tr
                   key={s.id}
                   className="clickable-row"
                   onClick={() => navigate(`/sessions/${s.id}`)}
                 >
-                  <td>{s.title || s.id.slice(0, 8)}</td>
+                  <td>{s.title || s.id.slice(0, 12)}</td>
                   <td><StatusBadge status={s.status} /></td>
                   <td>
                     <span className="provider-model">
                       {s.provider} / {s.model}
                     </span>
                   </td>
-                  <td>{s.messageCount}</td>
-                  <td className="nowrap">{new Date(s.createdAt).toLocaleDateString()}</td>
-                  <td className="nowrap">{new Date(s.lastActiveAt).toLocaleString()}</td>
+                  <td className="nowrap">{new Date(s.created_at).toLocaleDateString()}</td>
+                  <td className="nowrap">{new Date(s.updated_at).toLocaleString()}</td>
                 </tr>
               ))}
-              {data.sessions.length === 0 && (
-                <tr><td colSpan={6} className="empty-row">No sessions</td></tr>
+              {data.data.length === 0 && (
+                <tr><td colSpan={5} className="empty-row">No sessions</td></tr>
               )}
             </tbody>
           </table>
