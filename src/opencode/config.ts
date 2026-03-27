@@ -1,6 +1,6 @@
 export interface McpServerInput {
   name: string
-  type: string
+  type: string // "stdio" or "sse" from our admin panel
   command?: string
   url?: string
   env_vars?: string
@@ -21,52 +21,11 @@ export interface SessionConfigParams {
   skills?: SkillInput[]
 }
 
-interface StdioMcpServerConfig {
-  command: string
-  args: string[]
-  env?: Record<string, string>
-}
-
-interface SseMcpServerConfig {
-  url: string
-  env?: Record<string, string>
-}
-
-type McpServerConfig = StdioMcpServerConfig | SseMcpServerConfig
-
-interface AgentConfig {
-  systemPrompt: string
-  tools?: string[]
-  model?: string
-  type?: string
-}
-
-/**
- * Parse a command string into command + args.
- * The first whitespace-delimited token is the command, the rest are args.
- */
-function parseCommand(commandString: string): { command: string; args: string[] } {
-  const trimmed = commandString.trim()
-  if (!trimmed) {
-    return { command: "", args: [] }
-  }
-
-  const tokens = trimmed.split(/\s+/)
-  return {
-    command: tokens[0],
-    args: tokens.slice(1),
-  }
-}
-
 /**
  * Parse a JSON string of environment variables into a plain object.
- * Returns an empty object if the string is null, undefined, empty, or invalid JSON.
  */
 function parseEnvVars(envVarsJson: string | undefined | null): Record<string, string> {
-  if (!envVarsJson || !envVarsJson.trim()) {
-    return {}
-  }
-
+  if (!envVarsJson || !envVarsJson.trim()) return {}
   try {
     const parsed = JSON.parse(envVarsJson) as unknown
     if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) {
@@ -83,101 +42,44 @@ function parseEnvVars(envVarsJson: string | undefined | null): Record<string, st
 }
 
 /**
- * Parse an allowed_tools JSON string into a string array.
- * Returns undefined if the string is null, undefined, empty, or invalid JSON.
- */
-function parseAllowedTools(allowedToolsJson: string | undefined | null): string[] | undefined {
-  if (!allowedToolsJson || !allowedToolsJson.trim()) {
-    return undefined
-  }
-
-  try {
-    const parsed = JSON.parse(allowedToolsJson) as unknown
-    if (Array.isArray(parsed)) {
-      return parsed.filter((item): item is string => typeof item === "string")
-    }
-    return undefined
-  } catch {
-    return undefined
-  }
-}
-
-/**
  * Generate an opencode.json config object for a session.
  *
- * Returns an object matching the opencode.json schema with provider, model,
- * MCP server, and agent (skill) configuration.
+ * OpenCode 1.3.3 expects MCP servers under the "mcp" key with this format:
+ *   - Local (stdio): { "type": "local", "command": ["npx", "-y", "package"], "env": {} }
+ *   - Remote (SSE): { "type": "remote", "url": "http://..." }
  */
 export function generateSessionConfig(params: SessionConfigParams): Record<string, unknown> {
   const config: Record<string, unknown> = {}
 
-  // Provider and model configuration
-  config.provider = {
-    [params.provider]: {
-      models: {
-        [params.model]: {},
-      },
-    },
-  }
-
   // MCP servers configuration
   if (params.mcpServers && params.mcpServers.length > 0) {
-    const mcpServers: Record<string, McpServerConfig> = {}
+    const mcp: Record<string, unknown> = {}
 
     for (const server of params.mcpServers) {
       const env = parseEnvVars(server.env_vars)
       const hasEnv = Object.keys(env).length > 0
 
-      if (server.type === "stdio" && server.command) {
-        const { command, args } = parseCommand(server.command)
-        if (command) {
-          const serverConfig: StdioMcpServerConfig = { command, args }
-          if (hasEnv) {
-            serverConfig.env = env
-          }
-          mcpServers[server.name] = serverConfig
+      if ((server.type === "stdio" || server.type === "local") && server.command) {
+        // Parse command string into array: "npx -y package" -> ["npx", "-y", "package"]
+        const commandParts = server.command.trim().split(/\s+/)
+        const serverConfig: Record<string, unknown> = {
+          type: "local",
+          command: commandParts,
         }
-      } else if (server.type === "sse" && server.url) {
-        const serverConfig: SseMcpServerConfig = { url: server.url }
-        if (hasEnv) {
-          serverConfig.env = env
+        if (hasEnv) serverConfig.env = env
+        mcp[server.name] = serverConfig
+      } else if ((server.type === "sse" || server.type === "remote") && server.url) {
+        const serverConfig: Record<string, unknown> = {
+          type: "remote",
+          url: server.url,
         }
-        mcpServers[server.name] = serverConfig
+        if (hasEnv) serverConfig.env = env
+        mcp[server.name] = serverConfig
       }
     }
 
-    if (Object.keys(mcpServers).length > 0) {
-      config.mcpServers = mcpServers
-    }
-  }
-
-  // Agent (skill) configuration
-  if (params.skills && params.skills.length > 0) {
-    const agents: Record<string, AgentConfig> = {}
-
-    for (const skill of params.skills) {
-      const agentConfig: AgentConfig = {
-        systemPrompt: skill.system_prompt,
-      }
-
-      const tools = parseAllowedTools(skill.allowed_tools)
-      if (tools && tools.length > 0) {
-        agentConfig.tools = tools
-      }
-
-      // Build model string in "provider/model" format if both are provided
-      if (skill.model_provider && skill.model_id) {
-        agentConfig.model = `${skill.model_provider}/${skill.model_id}`
-      } else if (skill.model_id) {
-        // Fall back to just model ID if no provider specified
-        agentConfig.model = skill.model_id
-      }
-
-      agents[skill.name] = agentConfig
-    }
-
-    if (Object.keys(agents).length > 0) {
-      config.agents = agents
+    if (Object.keys(mcp).length > 0) {
+      config.mcp = mcp
     }
   }
 

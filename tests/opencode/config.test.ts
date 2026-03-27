@@ -1,27 +1,16 @@
 import { describe, it, expect } from 'vitest';
 import { generateSessionConfig } from '../../src/opencode/config.js';
-import type { McpServerInput, SkillInput, SessionConfigParams } from '../../src/opencode/config.js';
 
 describe('generateSessionConfig', () => {
-  it('generates basic provider/model config', () => {
+  it('generates empty config when no MCP servers', () => {
     const config = generateSessionConfig({
       provider: 'anthropic',
       model: 'claude-4-opus',
     });
-
-    expect(config.provider).toEqual({
-      anthropic: {
-        models: {
-          'claude-4-opus': {},
-        },
-      },
-    });
-    // No mcpServers or agents when none provided
-    expect(config.mcpServers).toBeUndefined();
-    expect(config.agents).toBeUndefined();
+    expect(config.mcp).toBeUndefined();
   });
 
-  it('generates config with stdio MCP servers', () => {
+  it('generates config with local (stdio) MCP servers', () => {
     const config = generateSessionConfig({
       provider: 'openai',
       model: 'gpt-4o',
@@ -34,15 +23,15 @@ describe('generateSessionConfig', () => {
       ],
     });
 
-    const mcpServers = config.mcpServers as Record<string, any>;
-    expect(mcpServers).toBeDefined();
-    expect(mcpServers.filesystem).toEqual({
-      command: 'npx',
-      args: ['-y', '@modelcontextprotocol/server-filesystem', '/tmp'],
+    const mcp = config.mcp as Record<string, any>;
+    expect(mcp).toBeDefined();
+    expect(mcp.filesystem).toEqual({
+      type: 'local',
+      command: ['npx', '-y', '@modelcontextprotocol/server-filesystem', '/tmp'],
     });
   });
 
-  it('generates config with SSE MCP servers', () => {
+  it('generates config with remote (SSE) MCP servers', () => {
     const config = generateSessionConfig({
       provider: 'openai',
       model: 'gpt-4o',
@@ -55,9 +44,10 @@ describe('generateSessionConfig', () => {
       ],
     });
 
-    const mcpServers = config.mcpServers as Record<string, any>;
-    expect(mcpServers).toBeDefined();
-    expect(mcpServers['remote-server']).toEqual({
+    const mcp = config.mcp as Record<string, any>;
+    expect(mcp).toBeDefined();
+    expect(mcp['remote-server']).toEqual({
+      type: 'remote',
       url: 'http://localhost:8080/sse',
     });
   });
@@ -76,10 +66,10 @@ describe('generateSessionConfig', () => {
       ],
     });
 
-    const mcpServers = config.mcpServers as Record<string, any>;
-    expect(mcpServers['server-with-env']).toEqual({
-      command: 'node',
-      args: ['server.js'],
+    const mcp = config.mcp as Record<string, any>;
+    expect(mcp['server-with-env']).toEqual({
+      type: 'local',
+      command: ['node', 'server.js'],
       env: { API_KEY: 'secret', PORT: '3000' },
     });
   });
@@ -97,86 +87,12 @@ describe('generateSessionConfig', () => {
       ],
     });
 
-    const mcpServers = config.mcpServers as Record<string, any>;
-    expect(mcpServers['no-env']).toEqual({
-      command: 'echo',
-      args: ['hello'],
+    const mcp = config.mcp as Record<string, any>;
+    expect(mcp['no-env']).toEqual({
+      type: 'local',
+      command: ['echo', 'hello'],
     });
-    // No env property when env_vars is empty/undefined
-    expect(mcpServers['no-env'].env).toBeUndefined();
-  });
-
-  it('generates config with skills (agents)', () => {
-    const config = generateSessionConfig({
-      provider: 'anthropic',
-      model: 'claude-4-opus',
-      skills: [
-        {
-          name: 'code-review',
-          system_prompt: 'You are a code reviewer. Be thorough.',
-          allowed_tools: '["read_file","write_file"]',
-          model_provider: 'anthropic',
-          model_id: 'claude-4-sonnet',
-        },
-      ],
-    });
-
-    const agents = config.agents as Record<string, any>;
-    expect(agents).toBeDefined();
-    expect(agents['code-review']).toEqual({
-      systemPrompt: 'You are a code reviewer. Be thorough.',
-      tools: ['read_file', 'write_file'],
-      model: 'anthropic/claude-4-sonnet',
-    });
-  });
-
-  it('handles skill with only model_id (no provider)', () => {
-    const config = generateSessionConfig({
-      provider: 'openai',
-      model: 'gpt-4o',
-      skills: [
-        {
-          name: 'summarizer',
-          system_prompt: 'Summarize text.',
-          model_id: 'gpt-4o-mini',
-        },
-      ],
-    });
-
-    const agents = config.agents as Record<string, any>;
-    expect(agents.summarizer.model).toBe('gpt-4o-mini');
-  });
-
-  it('omits tools when allowed_tools is null/undefined', () => {
-    const config = generateSessionConfig({
-      provider: 'openai',
-      model: 'gpt-4o',
-      skills: [
-        {
-          name: 'basic',
-          system_prompt: 'Basic skill.',
-        },
-      ],
-    });
-
-    const agents = config.agents as Record<string, any>;
-    expect(agents.basic.tools).toBeUndefined();
-  });
-
-  it('omits model when neither model_provider nor model_id is set', () => {
-    const config = generateSessionConfig({
-      provider: 'openai',
-      model: 'gpt-4o',
-      skills: [
-        {
-          name: 'minimal',
-          system_prompt: 'Minimal.',
-        },
-      ],
-    });
-
-    const agents = config.agents as Record<string, any>;
-    expect(agents.minimal.model).toBeUndefined();
+    expect(mcp['no-env'].env).toBeUndefined();
   });
 
   it('handles empty mcpServers array', () => {
@@ -185,16 +101,7 @@ describe('generateSessionConfig', () => {
       model: 'gpt-4o',
       mcpServers: [],
     });
-    expect(config.mcpServers).toBeUndefined();
-  });
-
-  it('handles empty skills array', () => {
-    const config = generateSessionConfig({
-      provider: 'openai',
-      model: 'gpt-4o',
-      skills: [],
-    });
-    expect(config.agents).toBeUndefined();
+    expect(config.mcp).toBeUndefined();
   });
 
   it('handles invalid env_vars JSON gracefully', () => {
@@ -211,25 +118,8 @@ describe('generateSessionConfig', () => {
       ],
     });
 
-    const mcpServers = config.mcpServers as Record<string, any>;
-    expect(mcpServers['bad-env'].env).toBeUndefined();
-  });
-
-  it('handles invalid allowed_tools JSON gracefully', () => {
-    const config = generateSessionConfig({
-      provider: 'openai',
-      model: 'gpt-4o',
-      skills: [
-        {
-          name: 'bad-tools',
-          system_prompt: 'Prompt.',
-          allowed_tools: 'not-json',
-        },
-      ],
-    });
-
-    const agents = config.agents as Record<string, any>;
-    expect(agents['bad-tools'].tools).toBeUndefined();
+    const mcp = config.mcp as Record<string, any>;
+    expect(mcp['bad-env'].env).toBeUndefined();
   });
 
   it('skips stdio servers with empty command', () => {
@@ -237,15 +127,10 @@ describe('generateSessionConfig', () => {
       provider: 'openai',
       model: 'gpt-4o',
       mcpServers: [
-        {
-          name: 'empty-cmd',
-          type: 'stdio',
-          command: '',
-        },
+        { name: 'empty-cmd', type: 'stdio', command: '' },
       ],
     });
-    // No valid servers, so mcpServers should be undefined
-    expect(config.mcpServers).toBeUndefined();
+    expect(config.mcp).toBeUndefined();
   });
 
   it('skips SSE servers with no url', () => {
@@ -253,16 +138,13 @@ describe('generateSessionConfig', () => {
       provider: 'openai',
       model: 'gpt-4o',
       mcpServers: [
-        {
-          name: 'no-url',
-          type: 'sse',
-        },
+        { name: 'no-url', type: 'sse' },
       ],
     });
-    expect(config.mcpServers).toBeUndefined();
+    expect(config.mcp).toBeUndefined();
   });
 
-  it('combines multiple MCP servers and skills', () => {
+  it('combines multiple MCP servers', () => {
     const config = generateSessionConfig({
       provider: 'anthropic',
       model: 'claude-4-opus',
@@ -270,16 +152,37 @@ describe('generateSessionConfig', () => {
         { name: 'fs', type: 'stdio', command: 'npx fs-server' },
         { name: 'api', type: 'sse', url: 'http://localhost:3000' },
       ],
-      skills: [
-        { name: 'review', system_prompt: 'Review code.' },
-        { name: 'test', system_prompt: 'Write tests.' },
+    });
+
+    const mcp = config.mcp as Record<string, any>;
+    expect(Object.keys(mcp)).toEqual(['fs', 'api']);
+    expect(mcp.fs.type).toBe('local');
+    expect(mcp.api.type).toBe('remote');
+  });
+
+  it('accepts "local" type directly', () => {
+    const config = generateSessionConfig({
+      provider: 'openai',
+      model: 'gpt-4o',
+      mcpServers: [
+        { name: 'test', type: 'local', command: 'npx test-server' },
       ],
     });
 
-    const mcpServers = config.mcpServers as Record<string, any>;
-    expect(Object.keys(mcpServers)).toEqual(['fs', 'api']);
+    const mcp = config.mcp as Record<string, any>;
+    expect(mcp.test.type).toBe('local');
+  });
 
-    const agents = config.agents as Record<string, any>;
-    expect(Object.keys(agents)).toEqual(['review', 'test']);
+  it('accepts "remote" type directly', () => {
+    const config = generateSessionConfig({
+      provider: 'openai',
+      model: 'gpt-4o',
+      mcpServers: [
+        { name: 'test', type: 'remote', url: 'http://localhost:9000' },
+      ],
+    });
+
+    const mcp = config.mcp as Record<string, any>;
+    expect(mcp.test.type).toBe('remote');
   });
 });

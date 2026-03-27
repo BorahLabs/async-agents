@@ -1,4 +1,4 @@
-import { createWorkerInstance, executePrompt } from '../opencode/client.js';
+import { createWorkerInstance, reconfigureForSession, executePrompt } from '../opencode/client.js';
 import type { OpenCodeInstance, PromptResult } from '../opencode/client.js';
 import {
   getMessage,
@@ -178,7 +178,22 @@ export class Worker {
     const providerRecord = getProviderByName(session.provider);
     const providerType = providerRecord?.type ?? session.provider;
 
-    // 6. Call executePrompt() with all resolved data
+    // 6. Reconfigure worker for this session (writes MCP config, restarts OpenCode if needed)
+    if (mcpServers.length > 0) {
+      try {
+        this.instance = await reconfigureForSession(
+          this.instance!,
+          this._id,
+          mcpServers,
+          session.working_directory,
+        );
+      } catch (error) {
+        const msg = error instanceof Error ? error.message : String(error);
+        console.error(`[worker:${this._id}] Failed to reconfigure MCP for session ${session.id}: ${msg}`);
+      }
+    }
+
+    // 7. Call executePrompt() with all resolved data
     try {
       const result: PromptResult = await executePrompt(this.instance!, {
         sessionId: session.id,

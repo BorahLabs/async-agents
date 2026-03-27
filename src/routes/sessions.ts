@@ -27,8 +27,16 @@ const router = Router();
 // POST / - Create session
 router.post('/', (req: Request, res: Response) => {
   try {
-    const { provider, model, title, system_prompt, working_directory, mcp_servers, skills } =
-      req.body;
+    const {
+      provider, model, title,
+      system_prompt, systemPrompt,
+      working_directory, workingDirectory,
+      mcp_servers, mcpServers,
+      skills,
+    } = req.body;
+    const finalSystemPrompt = system_prompt ?? systemPrompt ?? null;
+    const finalWorkingDir = working_directory ?? workingDirectory ?? null;
+    const finalMcpServers = mcp_servers ?? mcpServers ?? null;
 
     // Validate required fields
     if (!provider || !model) {
@@ -44,10 +52,10 @@ router.post('/', (req: Request, res: Response) => {
     }
 
     // Validate MCP servers if provided
-    if (mcp_servers) {
-      const serverNames: string[] = Array.isArray(mcp_servers)
-        ? mcp_servers
-        : JSON.parse(mcp_servers);
+    if (finalMcpServers) {
+      const serverNames: string[] = Array.isArray(finalMcpServers)
+        ? finalMcpServers
+        : JSON.parse(finalMcpServers);
       for (const name of serverNames) {
         const server = getMcpServerByName(name);
         if (!server) {
@@ -71,13 +79,13 @@ router.post('/', (req: Request, res: Response) => {
     }
 
     // Validate and create working directory if provided
-    if (working_directory) {
-      const validation = validateFolderName(working_directory);
+    if (finalWorkingDir) {
+      const validation = validateFolderName(finalWorkingDir);
       if (!validation.valid) {
         res.status(400).json({ error: validation.error });
         return;
       }
-      const folderPath = getFolderPath(working_directory);
+      const folderPath = getFolderPath(finalWorkingDir);
       fs.mkdirSync(folderPath, { recursive: true });
     }
 
@@ -86,12 +94,12 @@ router.post('/', (req: Request, res: Response) => {
       title: title ?? null,
       provider,
       model,
-      system_prompt: system_prompt ?? null,
-      working_directory: working_directory ?? null,
-      mcp_servers: mcp_servers
-        ? typeof mcp_servers === 'string'
-          ? mcp_servers
-          : JSON.stringify(mcp_servers)
+      system_prompt: finalSystemPrompt,
+      working_directory: finalWorkingDir,
+      mcp_servers: finalMcpServers
+        ? typeof finalMcpServers === 'string'
+          ? finalMcpServers
+          : JSON.stringify(finalMcpServers)
         : null,
       skills: skills
         ? typeof skills === 'string'
