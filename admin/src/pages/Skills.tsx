@@ -2,43 +2,11 @@ import { useCallback, useState } from 'react'
 import { usePolling } from '../hooks/usePolling'
 import { adminApi } from '../api'
 
-interface SkillRaw {
-  id: string
-  name: string
-  description: string | null
-  system_prompt: string
-  allowed_tools: string | null
-  model_provider: string | null
-  model_id: string | null
-  created_at: string
-}
-
 interface Skill {
-  id: string
   name: string
   description: string
   systemPrompt: string
-  allowedTools: string[]
-  modelProvider: string
-  modelId: string
   createdAt: string
-}
-
-function parseSkill(s: SkillRaw): Skill {
-  let allowedTools: string[] = []
-  if (s.allowed_tools) {
-    try { allowedTools = JSON.parse(s.allowed_tools) } catch { allowedTools = [] }
-  }
-  return {
-    id: s.id,
-    name: s.name,
-    description: s.description || '',
-    systemPrompt: s.system_prompt,
-    allowedTools,
-    modelProvider: s.model_provider || '',
-    modelId: s.model_id || '',
-    createdAt: s.created_at,
-  }
 }
 
 interface ImportResult {
@@ -52,16 +20,10 @@ const emptyForm = {
   name: '',
   description: '',
   systemPrompt: '',
-  allowedTools: '',
-  modelProvider: '',
-  modelId: '',
 }
 
 export default function Skills() {
-  const fetcher = useCallback(async () => {
-    const raw = await adminApi<SkillRaw[]>('/skills')
-    return raw.map(parseSkill)
-  }, [])
+  const fetcher = useCallback(() => adminApi<Skill[]>('/skills'), [])
   const { data, error, refresh } = usePolling(fetcher)
   const [editing, setEditing] = useState<string | null>(null)
   const [form, setForm] = useState(emptyForm)
@@ -82,14 +44,11 @@ export default function Skills() {
   }
 
   const openEdit = (s: Skill) => {
-    setEditing(s.id)
+    setEditing(s.name)
     setForm({
       name: s.name,
       description: s.description || '',
       systemPrompt: s.systemPrompt,
-      allowedTools: s.allowedTools.join(', '),
-      modelProvider: s.modelProvider || '',
-      modelId: s.modelId || '',
     })
     setFormError('')
   }
@@ -98,16 +57,10 @@ export default function Skills() {
     setSaving(true)
     setFormError('')
     try {
-      const tools = form.allowedTools.trim().toLowerCase() === 'all'
-        ? ['all']
-        : form.allowedTools.split(',').map((t) => t.trim()).filter(Boolean)
       const body = {
         name: form.name,
         description: form.description || undefined,
-        systemPrompt: form.systemPrompt,
-        allowedTools: tools,
-        modelProvider: form.modelProvider || undefined,
-        modelId: form.modelId || undefined,
+        system_prompt: form.systemPrompt,
       }
       if (editing === 'new') {
         await adminApi('/skills', { method: 'POST', body: JSON.stringify(body) })
@@ -123,10 +76,10 @@ export default function Skills() {
     }
   }
 
-  const remove = async (id: string) => {
+  const remove = async (name: string) => {
     if (!confirm('Delete this skill?')) return
     try {
-      await adminApi(`/skills/${id}`, { method: 'DELETE' })
+      await adminApi(`/skills/${name}`, { method: 'DELETE' })
       refresh()
     } catch (e) {
       alert(String(e))
@@ -251,43 +204,20 @@ export default function Skills() {
               <input
                 value={form.name}
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
+                disabled={editing !== 'new'}
               />
             </label>
-            <label className="form-field">
+            <label className="form-field form-field-full">
               <span>Description</span>
               <input
                 value={form.description}
                 onChange={(e) => setForm({ ...form, description: e.target.value })}
               />
             </label>
-            <label className="form-field">
-              <span>Model Provider</span>
-              <input
-                value={form.modelProvider}
-                onChange={(e) => setForm({ ...form, modelProvider: e.target.value })}
-                placeholder="e.g. openai"
-              />
-            </label>
-            <label className="form-field">
-              <span>Model ID</span>
-              <input
-                value={form.modelId}
-                onChange={(e) => setForm({ ...form, modelId: e.target.value })}
-                placeholder="e.g. gpt-4o"
-              />
-            </label>
-            <label className="form-field form-field-full">
-              <span>Allowed Tools (comma-separated, or "all")</span>
-              <input
-                value={form.allowedTools}
-                onChange={(e) => setForm({ ...form, allowedTools: e.target.value })}
-                placeholder='read_file, write_file or "all"'
-              />
-            </label>
             <label className="form-field form-field-full">
               <span>System Prompt</span>
               <textarea
-                rows={5}
+                rows={8}
                 value={form.systemPrompt}
                 onChange={(e) => setForm({ ...form, systemPrompt: e.target.value })}
               />
@@ -309,32 +239,22 @@ export default function Skills() {
               <tr>
                 <th>Name</th>
                 <th>Description</th>
-                <th>Provider / Model</th>
-                <th>Tools</th>
-                <th>Created</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {data.map((s) => (
-                <tr key={s.id}>
+                <tr key={s.name}>
                   <td>{s.name}</td>
                   <td className="truncate-cell">{s.description || '—'}</td>
-                  <td>
-                    {s.modelProvider || s.modelId
-                      ? `${s.modelProvider || '?'} / ${s.modelId || '?'}`
-                      : '—'}
-                  </td>
-                  <td>{s.allowedTools.join(', ')}</td>
-                  <td className="nowrap">{new Date(s.createdAt).toLocaleDateString()}</td>
                   <td className="actions-cell">
                     <button className="btn btn-sm" onClick={() => openEdit(s)}>Edit</button>
-                    <button className="btn btn-sm btn-danger" onClick={() => remove(s.id)}>Delete</button>
+                    <button className="btn btn-sm btn-danger" onClick={() => remove(s.name)}>Delete</button>
                   </td>
                 </tr>
               ))}
               {data.length === 0 && (
-                <tr><td colSpan={6} className="empty-row">No skills configured</td></tr>
+                <tr><td colSpan={3} className="empty-row">No skills configured</td></tr>
               )}
             </tbody>
           </table>
