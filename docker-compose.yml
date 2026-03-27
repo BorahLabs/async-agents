@@ -1,0 +1,16 @@
+services:
+  async-agents:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - PORT=3000
+      # Pass your LLM provider keys
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+    volumes:
+      # Persist OpenCode data
+      - opencode-data:/root/.local/share/opencode
+
+volumes:
+  opencode-data:
