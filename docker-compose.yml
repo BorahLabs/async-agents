@@ -11,8 +11,10 @@ services:
       - agents-db:/app/db
       - agents-data:/app/data
       - opencode-data:/root/.local/share/opencode
+      - opencode-config:/root/.config/opencode
 
 volumes:
   agents-db:
   agents-data:
   opencode-data:
+  opencode-config:
