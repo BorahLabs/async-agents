@@ -144,23 +144,25 @@ export async function executePrompt(
     },
   }
 
-  // Inject system prompt if provided
-  if (params.systemPrompt) {
+  // Inject system prompt if provided and non-trivial
+  if (params.systemPrompt && params.systemPrompt.trim().length > 0 && params.systemPrompt !== 'string') {
     promptBody.system = params.systemPrompt
   }
 
-  // Add structured output schema if provided
+  // Add structured output schema if provided (skip empty schemas)
   if (params.structuredOutputSchema) {
     try {
       const parsedSchema = JSON.parse(params.structuredOutputSchema) as Record<string, unknown>
-      promptBody.format = {
-        type: "json_schema",
-        schema: parsedSchema,
+      // Only apply if schema has actual properties (not just "{}")
+      if (Object.keys(parsedSchema).length > 0) {
+        promptBody.format = {
+          type: "json_schema",
+          schema: parsedSchema,
+        }
       }
     } catch {
-      throw new Error(
-        `Invalid structuredOutputSchema JSON: ${params.structuredOutputSchema.slice(0, 200)}`,
-      )
+      // Invalid JSON — skip structured output rather than failing
+      console.warn(`[opencode] Invalid structuredOutputSchema, skipping: ${params.structuredOutputSchema.slice(0, 100)}`)
     }
   }
 
@@ -175,17 +177,21 @@ export async function executePrompt(
   let responseData = promptResponse.data as Record<string, unknown> | undefined
 
   if (!responseData || !responseData.parts) {
+    console.log(`[opencode] prompt().data has no parts (keys: ${Object.keys(responseData ?? {}).join(',') || 'none'}), falling back to session messages`)
+
     // Fall back: fetch messages from the session and find the last assistant message
     const messagesResponse = await client.session.messages({
       path: { id: opencodeSessionId },
     })
     const messages = (messagesResponse.data ?? []) as Array<Record<string, unknown>>
+    console.log(`[opencode] Session has ${messages.length} messages`)
 
     for (let i = messages.length - 1; i >= 0; i--) {
       const msg = messages[i]
       const msgInfo = msg.info as Record<string, unknown> | undefined
       if (msgInfo?.role === 'assistant') {
         responseData = msg
+        console.log(`[opencode] Found assistant message with ${((msg.parts as unknown[]) ?? []).length} parts`)
         break
       }
     }
