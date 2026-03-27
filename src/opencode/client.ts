@@ -1,5 +1,6 @@
 import { createOpencode } from "@opencode-ai/sdk"
 import type { OpencodeClient } from "@opencode-ai/sdk"
+import { listProviders } from "../db/queries/providers.js"
 
 export interface OpenCodeInstance {
   client: OpencodeClient
@@ -47,10 +48,58 @@ export interface PromptResult {
 }
 
 /**
+ * Map provider type IDs to the environment variable names OpenCode expects.
+ */
+const PROVIDER_ENV_MAP: Record<string, string> = {
+  anthropic: "ANTHROPIC_API_KEY",
+  openai: "OPENAI_API_KEY",
+  "google-generative-ai": "GOOGLE_GENERATIVE_AI_API_KEY",
+  groq: "GROQ_API_KEY",
+  deepseek: "DEEPSEEK_API_KEY",
+  openrouter: "OPENROUTER_API_KEY",
+  mistral: "MISTRAL_API_KEY",
+  xai: "XAI_API_KEY",
+  "fireworks-ai": "FIREWORKS_API_KEY",
+  "together-ai": "TOGETHER_AI_API_KEY",
+  cohere: "COHERE_API_KEY",
+  perplexity: "PERPLEXITY_API_KEY",
+  cerebras: "CEREBRAS_API_KEY",
+  "deep-infra": "DEEP_INFRA_API_KEY",
+  "hugging-face": "HUGGING_FACE_HUB_TOKEN",
+  "venice-ai": "VENICE_API_KEY",
+  "moonshot-ai": "MOONSHOT_API_KEY",
+}
+
+/**
+ * Inject all configured provider API keys into process.env so the
+ * OpenCode Go server (spawned as a child process) inherits them.
+ */
+function injectProviderEnvVars(): void {
+  const providers = listProviders()
+  for (const provider of providers) {
+    const envKey = PROVIDER_ENV_MAP[provider.type]
+    if (envKey && provider.api_key) {
+      process.env[envKey] = provider.api_key
+    }
+    // Also inject any extra env vars from the provider config
+    if (provider.env_vars) {
+      try {
+        const extra = JSON.parse(provider.env_vars) as Record<string, string>
+        for (const [key, value] of Object.entries(extra)) {
+          if (key && value) process.env[key] = value
+        }
+      } catch { /* ignore invalid JSON */ }
+    }
+  }
+}
+
+/**
  * Create a new OpenCode instance for a worker.
  * Each instance starts its own Go server process on a unique port.
+ * Injects all configured provider API keys into the environment first.
  */
 export async function createWorkerInstance(workerId: number): Promise<OpenCodeInstance> {
+  injectProviderEnvVars()
   const port = 4096 + workerId
   const { client } = await createOpencode({
     hostname: "127.0.0.1",
@@ -115,36 +164,42 @@ export async function executePrompt(
     }
   }
 
-  // Send the prompt
-  await client.session.prompt({
+  // Send the prompt — response contains the assistant message directly
+  const promptResponse = await client.session.prompt({
     path: { id: opencodeSessionId },
     body: promptBody as Parameters<typeof client.session.prompt>[0]["body"],
   })
 
-  // Fetch messages to get the assistant response
-  const messagesResponse = await client.session.messages({
-    path: { id: opencodeSessionId },
-  })
+  // The prompt() returns the assistant message in .data with { info, parts }
+  // If .data is empty (e.g. provider not configured), fall back to fetching messages
+  let responseData = promptResponse.data as Record<string, unknown> | undefined
 
-  const messages = messagesResponse.data ?? []
+  if (!responseData || !responseData.parts) {
+    // Fall back: fetch messages from the session and find the last assistant message
+    const messagesResponse = await client.session.messages({
+      path: { id: opencodeSessionId },
+    })
+    const messages = (messagesResponse.data ?? []) as Array<Record<string, unknown>>
 
-  // Find the last assistant message
-  const assistantMessages = messages.filter(
-    (msg: Record<string, unknown>) => msg.role === "assistant",
-  )
-  const lastAssistantMessage = assistantMessages[assistantMessages.length - 1] as
-    | Record<string, unknown>
-    | undefined
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const msg = messages[i]
+      const msgInfo = msg.info as Record<string, unknown> | undefined
+      if (msgInfo?.role === 'assistant') {
+        responseData = msg
+        break
+      }
+    }
+  }
 
-  // Extract content from the assistant message
+  // Extract content from the response parts
   let content = ""
   let structuredOutput: unknown = undefined
   const toolCalls: ToolCallResult[] = []
 
-  if (lastAssistantMessage) {
-    const messageParts = (lastAssistantMessage.parts ?? []) as Array<Record<string, unknown>>
+  if (responseData) {
+    const parts = (responseData.parts ?? []) as Array<Record<string, unknown>>
 
-    for (const part of messageParts) {
+    for (const part of parts) {
       if (part.type === "text" && typeof part.text === "string") {
         content += part.text
       } else if (part.type === "tool-invocation" || part.type === "tool_use") {
@@ -164,7 +219,6 @@ export async function executePrompt(
             structuredOutput =
               typeof part.output === "string" ? JSON.parse(part.output) : part.output
           } catch {
-            // If parsing fails, keep the raw output
             structuredOutput = part.output
           }
         }
@@ -181,18 +235,12 @@ export async function executePrompt(
     }
   }
 
-  // Extract token usage from the message metadata
-  const tokenUsage: Record<string, unknown> = {}
-  if (lastAssistantMessage) {
-    const metadata = lastAssistantMessage.metadata as Record<string, unknown> | undefined
-    if (metadata?.usage) {
-      Object.assign(tokenUsage, metadata.usage as Record<string, unknown>)
-    }
-    if (typeof lastAssistantMessage.inputTokens === "number") {
-      tokenUsage.inputTokens = lastAssistantMessage.inputTokens
-    }
-    if (typeof lastAssistantMessage.outputTokens === "number") {
-      tokenUsage.outputTokens = lastAssistantMessage.outputTokens
+  // Extract token usage from response info.tokens
+  let tokenUsage: Record<string, unknown> = {}
+  if (responseData) {
+    const info = responseData.info as Record<string, unknown> | undefined
+    if (info?.tokens && typeof info.tokens === 'object') {
+      tokenUsage = info.tokens as Record<string, unknown>
     }
   }
 

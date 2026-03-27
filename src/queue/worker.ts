@@ -11,6 +11,7 @@ import { recordTokenUsage } from '../db/queries/tokenUsage.js';
 import { recordToolCall } from '../db/queries/toolCalls.js';
 import { getMcpServerByName } from '../db/queries/mcpServers.js';
 import { getSkillByName } from '../db/queries/skills.js';
+import { getProviderByName } from '../db/queries/providers.js';
 import type { McpServer } from '../db/queries/mcpServers.js';
 import type { Skill } from '../db/queries/skills.js';
 
@@ -176,14 +177,18 @@ export class Worker {
       );
     }
 
-    // 5. Call executePrompt() with all resolved data
+    // 5. Resolve provider type (our DB stores display name, OpenCode needs the type ID)
+    const providerRecord = getProviderByName(session.provider);
+    const providerType = providerRecord?.type ?? session.provider;
+
+    // 6. Call executePrompt() with all resolved data
     try {
       const result: PromptResult = await executePrompt(this.instance!, {
         sessionId: session.id,
         opencodeSessionId: session.opencode_session_id,
         text: message.content ?? '',
         systemPrompt: session.system_prompt,
-        provider: session.provider,
+        provider: providerType,
         model: session.model,
         mcpServers,
         skills,
