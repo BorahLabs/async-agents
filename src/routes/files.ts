@@ -99,8 +99,8 @@ router.get('/:folder', (req: Request, res: Response) => {
   }
 });
 
-// GET /:folder/* - Retrieve single file
-router.get('/:folder/*', (req: Request, res: Response) => {
+// GET /:folder/{*filepath} - Retrieve single file
+router.get('/:folder/{*filepath}', (req: Request, res: Response) => {
   try {
     const folder = req.params.folder as string;
     const folderValidation = validateFolderName(folder);
@@ -109,7 +109,8 @@ router.get('/:folder/*', (req: Request, res: Response) => {
       return;
     }
 
-    const relativePath = (req.params as Record<string, string>)[0];
+    const rawPath = req.params.filepath as string;
+    const relativePath = Array.isArray(rawPath) ? rawPath.join('/') : rawPath;
     if (!relativePath) {
       res.status(400).json({ error: 'File path is required' });
       return;

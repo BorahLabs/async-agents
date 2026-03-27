@@ -58,7 +58,13 @@ app.use("/api/admin/github", githubRouter)
 // Serve admin panel static files
 const adminPath = path.join(__dirname, "admin")
 app.use(express.static(adminPath))
-app.get(/^\/(?!api\/).*/, (_req, res) => {
+
+// SPA fallback — serve index.html for non-API routes
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api/")) {
+    next()
+    return
+  }
   res.sendFile(path.join(adminPath, "index.html"))
 })
 

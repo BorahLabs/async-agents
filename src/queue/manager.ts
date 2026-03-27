@@ -38,9 +38,14 @@ export class QueueManager {
       `[queue-manager] Target concurrency: ${this._targetConcurrency}`
     );
 
-    // 3. Spawn that many workers
+    // 3. Spawn workers (stop on first failure — reconcile will retry later)
     for (let i = 0; i < this._targetConcurrency; i++) {
-      await this.spawnWorker();
+      const ok = await this.spawnWorker();
+      if (!ok) {
+        console.warn('[queue-manager] Worker spawn failed, will retry via reconcile');
+        this._lastSpawnFailure = Date.now();
+        break;
+      }
     }
 
     // 4. Start reconcile interval
@@ -71,6 +76,9 @@ export class QueueManager {
     console.log('[queue-manager] Stopped');
   }
 
+  private _lastSpawnFailure: number = 0;
+  private _spawnBackoffMs: number = 30000; // 30s cooldown after spawn failure
+
   private async reconcile(): Promise<void> {
     // 1. Read max_concurrent_workers from settings
     const concurrencySetting = getSetting('max_concurrent_workers');
@@ -82,18 +90,23 @@ export class QueueManager {
       return;
     }
 
-    if (target === this._targetConcurrency && this.workers.length === target) {
-      return;
-    }
-
     this._targetConcurrency = target;
 
-    // 2. If current worker count < target, spawn more workers
-    while (this.workers.length < this._targetConcurrency) {
+    // 2. If current worker count < target, spawn more workers (with backoff on failure)
+    if (this.workers.length < this._targetConcurrency) {
+      const now = Date.now();
+      if (now - this._lastSpawnFailure < this._spawnBackoffMs) {
+        return; // Still in cooldown from previous spawn failure
+      }
+
       console.log(
         `[queue-manager] Scaling up: ${this.workers.length} -> ${this._targetConcurrency}`
       );
-      await this.spawnWorker();
+      const spawned = await this.spawnWorker();
+      if (!spawned) {
+        this._lastSpawnFailure = now;
+        return; // Don't try to spawn more if one failed
+      }
     }
 
     // 3. If current worker count > target, stop excess workers (last ones first)
@@ -105,7 +118,7 @@ export class QueueManager {
     }
   }
 
-  private async spawnWorker(): Promise<void> {
+  private async spawnWorker(): Promise<boolean> {
     // Find next available worker ID
     const existingIds = new Set(this.workers.map((w) => w.workerId));
     let nextId = 0;
@@ -117,11 +130,13 @@ export class QueueManager {
     try {
       await worker.start();
       this.workers.push(worker);
+      return true;
     } catch (error) {
       console.error(
         `[queue-manager] Failed to spawn worker ${nextId}:`,
         error
       );
+      return false;
     }
   }
 

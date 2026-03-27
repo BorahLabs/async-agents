@@ -7,7 +7,7 @@ RUN apt-get update && apt-get install -y \
 
 # Install OpenCode CLI
 RUN curl -fsSL https://opencode.ai/install | bash
-ENV PATH="/root/.local/bin:${PATH}"
+ENV PATH="/root/.opencode/bin:/root/.local/bin:${PATH}"
 
 # Install GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
@@ -19,14 +19,17 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
 
 WORKDIR /app
 
-# Install backend dependencies
+# Install ALL backend dependencies (need devDeps for tsc)
 COPY package.json package-lock.json* ./
-RUN npm ci --omit=dev
+RUN npm ci
 
 # Build backend
 COPY tsconfig.json ./
 COPY src/ ./src/
 RUN npm run build
+
+# Remove devDependencies after build
+RUN npm prune --omit=dev
 
 # Install and build admin panel
 COPY admin/package.json admin/package-lock.json* ./admin/
@@ -36,6 +39,9 @@ RUN cd admin && npm run build
 
 # Copy built admin panel to dist for static serving
 RUN cp -r admin/dist ./dist/admin
+
+# Clean up admin source (only need the built files)
+RUN rm -rf admin/src admin/node_modules
 
 # Copy research docs (referenced by CLAUDE.md)
 COPY research/ ./research/
