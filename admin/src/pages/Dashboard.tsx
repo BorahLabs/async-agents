@@ -3,23 +3,31 @@ import { usePolling } from '../hooks/usePolling'
 import { adminApi } from '../api'
 import StatusBadge from '../components/StatusBadge'
 
+interface TokenStat {
+  provider: string
+  date: string
+  total_input: number
+  total_output: number
+}
+
 interface DashboardData {
-  workers: { active: number; total: number }
-  queueLength: number
-  totalSessions: number
+  workers: { active: number; max: number; queueLength: number }
+  sessions: { total: number; active: number; todayCount: number }
   recentMessages: Array<{
     id: string
-    sessionId: string
+    session_id: string
     role: string
-    content: string
+    content: string | null
     status: string
-    createdAt: string
+    queued_at: string
+    completed_at: string | null
+    failed_at: string | null
   }>
-  tokenUsage: Array<{
-    provider: string
-    inputTokens: number
-    outputTokens: number
-  }>
+  tokenUsage: {
+    day: TokenStat[]
+    week: TokenStat[]
+    month: TokenStat[]
+  }
 }
 
 export default function Dashboard() {
@@ -28,6 +36,15 @@ export default function Dashboard() {
 
   if (error) return <div className="error-banner">{error}</div>
   if (!data) return <div className="loading">Loading...</div>
+
+  // Aggregate token usage from the month view by provider
+  const usageByProvider = new Map<string, { input: number; output: number }>()
+  for (const row of data.tokenUsage.month) {
+    const existing = usageByProvider.get(row.provider) || { input: 0, output: 0 }
+    existing.input += row.total_input || 0
+    existing.output += row.total_output || 0
+    usageByProvider.set(row.provider, existing)
+  }
 
   return (
     <div className="page">
@@ -38,16 +55,16 @@ export default function Dashboard() {
           <div className="stat-label">Active Workers</div>
           <div className="stat-value">
             {data.workers.active}
-            <span className="stat-secondary">/ {data.workers.total}</span>
+            <span className="stat-secondary">/ {data.workers.max}</span>
           </div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Queue Length</div>
-          <div className="stat-value">{data.queueLength}</div>
+          <div className="stat-value">{data.workers.queueLength}</div>
         </div>
         <div className="stat-card">
           <div className="stat-label">Total Sessions</div>
-          <div className="stat-value">{data.totalSessions}</div>
+          <div className="stat-value">{data.sessions.total}</div>
         </div>
       </div>
 
@@ -70,9 +87,11 @@ export default function Dashboard() {
                     <td>
                       <span className={`role-tag role-${msg.role}`}>{msg.role}</span>
                     </td>
-                    <td className="truncate-cell">{msg.content}</td>
+                    <td className="truncate-cell">{msg.content || '—'}</td>
                     <td><StatusBadge status={msg.status} /></td>
-                    <td className="nowrap">{new Date(msg.createdAt).toLocaleTimeString()}</td>
+                    <td className="nowrap">
+                      {new Date(msg.completed_at || msg.failed_at || msg.queued_at).toLocaleTimeString()}
+                    </td>
                   </tr>
                 ))}
                 {data.recentMessages.length === 0 && (
@@ -84,7 +103,7 @@ export default function Dashboard() {
         </div>
 
         <div className="card">
-          <h2 className="card-title">Token Usage by Provider</h2>
+          <h2 className="card-title">Token Usage by Provider (30d)</h2>
           <div className="table-container">
             <table>
               <thead>
@@ -96,15 +115,15 @@ export default function Dashboard() {
                 </tr>
               </thead>
               <tbody>
-                {data.tokenUsage.map((tu) => (
-                  <tr key={tu.provider}>
-                    <td>{tu.provider}</td>
-                    <td>{tu.inputTokens.toLocaleString()}</td>
-                    <td>{tu.outputTokens.toLocaleString()}</td>
-                    <td>{(tu.inputTokens + tu.outputTokens).toLocaleString()}</td>
+                {[...usageByProvider.entries()].map(([provider, usage]) => (
+                  <tr key={provider}>
+                    <td>{provider}</td>
+                    <td>{usage.input.toLocaleString()}</td>
+                    <td>{usage.output.toLocaleString()}</td>
+                    <td>{(usage.input + usage.output).toLocaleString()}</td>
                   </tr>
                 ))}
-                {data.tokenUsage.length === 0 && (
+                {usageByProvider.size === 0 && (
                   <tr><td colSpan={4} className="empty-row">No usage data</td></tr>
                 )}
               </tbody>
